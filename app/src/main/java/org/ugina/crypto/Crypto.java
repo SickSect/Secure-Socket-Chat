@@ -12,7 +12,7 @@ import java.util.Base64;
 public class Crypto {
     private static final int IV_LENGTH = 12;
     private static final int TAG_LENGTH_BITS = 128;
-    private static final String TRANSOFRMATION_STRING = "AES/GCM/NoPadding";
+    private static final String TRANSOFRMATION_STRING = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
 
     public static String encrypt(String plainText, SecretKey secretKey) throws CryptoException {
         try {

@@ -1,15 +1,31 @@
 package org.ugina.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.ugina.crypto.Crypto;
+import org.ugina.crypto.CryptoException;
+import org.ugina.crypto.KeyLoader;
 import org.ugina.protocol.ClientMessage;
 import org.ugina.protocol.CommandType;
+import org.ugina.protocol.ServerMessage;
 
+import javax.crypto.SecretKey;
 import java.io.*;
 import java.net.Socket;
+import java.security.GeneralSecurityException;
 
 public class EchoClient {
     private static final String HOST = "localhost";
     private static final int PORT = 5000;
+    private static final SecretKey KEY;
+    private static final ObjectMapper mapper = new ObjectMapper();
+
+    static {
+        try {
+            KEY = KeyLoader.getSecretKey();
+        } catch (GeneralSecurityException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
 
     public static void main(String[] args) throws IOException {
@@ -22,13 +38,23 @@ public class EchoClient {
             System.out.println("[client] type messages, /quit to exit");
 
             Thread reader = new Thread(() -> {
-                try{
+                try {
                     String line;
-                    while ((line = in.readLine()) != null){
-                        System.out.println("[server]: " + line);
+                    while ((line = in.readLine()) != null) {
+                        String decoded = Crypto.decrypt(line, KEY);
+                        ServerMessage msg = mapper.readValue(decoded, ServerMessage.class);
+
+                        switch (msg.type) {
+                            case DM -> System.out.println("[" + msg.fromClientName + "]: " + msg.text);
+                            case DELIVERED -> System.out.println("[delivered]");
+                            case ERROR -> System.out.println("[error: " + msg.errorCode + "] " + msg.text);
+                            case SYSTEM -> System.out.println("[server] " + msg.text);
+                        }
                     }
-                }catch (IOException e){
+                } catch (IOException e) {
                     System.out.println("[client]: connection lost");
+                } catch (CryptoException e) {
+                    System.out.println("[client]: decryption failed - " + e.getMessage());
                 }
             });
             reader.setDaemon(true);
