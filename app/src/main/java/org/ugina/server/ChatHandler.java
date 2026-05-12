@@ -44,19 +44,22 @@ public class ChatHandler implements Runnable{
                 String decryptedMsg = Crypto.decrypt(line, secretKey);
                 ClientMessage msg = mapper.readValue(decryptedMsg, ClientMessage.class);
                 System.out.println("[ChatHandler] received decoded: " + msg.message + " " + msg.clientName +  " " + msg.commandType);
-                if (msg.commandType == CommandType.QUIT) {
-                    System.out.println("[ChatHandler] client quit: " + clientName);
-                    room.leaveClient(clientName);
-                    break;
-                }
-                else if (msg.commandType == CommandType.SEND_MESSAGE){
-                    System.out.println("[ChatHandler] send message: " + clientName);
-                    room.sendMessage(msg);
-                }
-                else if (msg.commandType == CommandType.JOIN){
-                    System.out.println("[ChatHandler] client username: " + msg.message);
-                    room.joinClient(msg.message, this);
-                    clientName = msg.message;
+                switch (msg.commandType){
+                    case JOIN -> {
+                        System.out.println("[ChatHandler] client username: " + msg.message);
+                        room.joinClient(msg.message, this);
+                        clientName = msg.message;
+                    }
+                    case QUIT -> {
+                        System.out.println("[ChatHandler] client quit: " + clientName);
+                        room.leaveClient(clientName);
+                        break;
+                    }
+                    case SEND_MESSAGE -> {
+                        System.out.println("[ChatHandler] send message: " + clientName);
+                        room.sendMessage(msg, clientName);
+
+                    }
                 }
             }
         }catch (Exception e){
