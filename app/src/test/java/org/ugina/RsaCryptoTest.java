@@ -104,8 +104,6 @@ public class RsaCryptoTest {
         String plainText = "Hello World! Привет мир!";
 
         byte[] encrypted = RsaCrypto.encrypt(plainText.getBytes(), publicKey1);
-
-        byte[] decrypted1 = RsaCrypto.decrypt(encrypted, privateKey1);
         byte[] decrypted2 = RsaCrypto.decrypt(encrypted, privateKey2);
     }
 }
