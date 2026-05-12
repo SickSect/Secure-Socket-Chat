@@ -1,6 +1,8 @@
-package org.example.client;
+package org.ugina.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.ugina.protocol.ClientMessage;
+import org.ugina.protocol.CommandType;
 
 import java.io.*;
 import java.net.Socket;
@@ -8,7 +10,7 @@ import java.net.Socket;
 public class EchoClient {
     private static final String HOST = "localhost";
     private static final int PORT = 5000;
-    private static final ObjectMapper mapper = new ObjectMapper();
+
 
     public static void main(String[] args) throws IOException {
         try (Socket socket = new Socket(HOST, PORT);
@@ -35,14 +37,22 @@ public class EchoClient {
             // GET NAME
             System.out.println("[client] Enter your name:");
             String clientName = stdin.readLine();
-            out.println(clientName);
+            ClientMessage joinMessage = new ClientMessage();
+            joinMessage.commandType = CommandType.JOIN;
+            joinMessage.clientName = clientName;
+            joinMessage.message = clientName;
+            out.println(ClientCipherService.encodeMessage(joinMessage));
 
             while (true) {
                 System.out.println("[client] Enter command: /msg or /quit");
                 String cmd = stdin.readLine();
                 if (cmd == null || "/quit".equals(cmd)) {
-                    ClientMessage quitMsg = new ClientMessage(null, clientName, null, CommandType.QUIT);
-                    out.println(mapper.writeValueAsString(quitMsg));
+                    ClientMessage quitMsg = new ClientMessage();
+                    quitMsg.commandType = CommandType.QUIT;
+                    quitMsg.clientName = clientName;
+                    quitMsg.toClientName = null;
+                    quitMsg.message = null;
+                    out.println(ClientCipherService.encodeMessage(quitMsg));
                     break;
                 }
                 if ("/msg".equals(cmd)) {
@@ -50,8 +60,12 @@ public class EchoClient {
                     String receiver = stdin.readLine();
                     System.out.println("[client] Enter message:");
                     String text = stdin.readLine();
-                    ClientMessage msg = new ClientMessage(receiver, clientName, text, CommandType.SEND_MESSAGE);
-                    out.println(mapper.writeValueAsString(msg));
+                    ClientMessage msg = new ClientMessage();
+                    msg.clientName = clientName;
+                    msg.toClientName = receiver;
+                    msg.message = text;
+                    msg.commandType = CommandType.SEND_MESSAGE;
+                    out.println(ClientCipherService.encodeMessage(msg));
                 }
             }
         }

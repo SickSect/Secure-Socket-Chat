@@ -1,15 +1,16 @@
-package org.example.server;
+package org.ugina.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.example.client.ClientMessage;
-import org.example.client.CommandType;
+import org.ugina.crypto.Crypto;
+import org.ugina.protocol.ClientMessage;
+import org.ugina.protocol.CommandType;
 
+import javax.crypto.SecretKey;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.net.SocketAddress;
 
 public class ChatHandler implements Runnable{
 
@@ -19,9 +20,11 @@ public class ChatHandler implements Runnable{
     public BufferedReader in;
     private String clientName = null;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final SecretKey secretKey;
 
-    public ChatHandler(Socket clientSocket, ChatRoom chatRoom) throws IOException {
+    public ChatHandler(Socket clientSocket, ChatRoom chatRoom, SecretKey secretKey) throws IOException {
         this.clientSocket = clientSocket;
+        this.secretKey = secretKey;
         room = chatRoom;
     }
 
@@ -35,12 +38,12 @@ public class ChatHandler implements Runnable{
 
 
             String line;
-            clientName = in.readLine();
-            System.out.println("[ChatHandler] client username: " + clientName);
-            room.joinClient(clientName, this);
+
             while((line = in.readLine()) != null){
                 System.out.println("[ChatHandler] received: " + line);
-                ClientMessage msg = mapper.readValue(line, ClientMessage.class);
+                String decryptedMsg = Crypto.decrypt(line, secretKey);
+                ClientMessage msg = mapper.readValue(decryptedMsg, ClientMessage.class);
+                System.out.println("[ChatHandler] received decoded: " + msg.message + " " + msg.clientName +  " " + msg.commandType);
                 if (msg.commandType == CommandType.QUIT) {
                     System.out.println("[ChatHandler] client quit: " + clientName);
                     room.leaveClient(clientName);
@@ -49,6 +52,11 @@ public class ChatHandler implements Runnable{
                 else if (msg.commandType == CommandType.SEND_MESSAGE){
                     System.out.println("[ChatHandler] send message: " + clientName);
                     room.sendMessage(msg);
+                }
+                else if (msg.commandType == CommandType.JOIN){
+                    System.out.println("[ChatHandler] client username: " + msg.message);
+                    room.joinClient(msg.message, this);
+                    clientName = msg.message;
                 }
             }
         }catch (Exception e){

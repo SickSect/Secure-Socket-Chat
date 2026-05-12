@@ -1,6 +1,6 @@
-package org.example.server;
+package org.ugina.server;
 
-import org.example.client.ClientMessage;
+import org.ugina.protocol.ClientMessage;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,15 +23,15 @@ public class ChatRoom {
     }
 
     public void sendMessage(ClientMessage message) {
-        System.out.println("[sendMessage] from client send: " + message.fromClientName + " to client: " + message.toClientName + " message: " + message.message);
+        System.out.println("[sendMessage] from client send: " + message.clientName + " to client: " + message.toClientName + " message: " + message.message);
         if (!clientHandlers.containsKey(message.toClientName)) {
-            clientHandlers.get(message.fromClientName).out.println("[server] client:" + message.toClientName + " not connected");
+            clientHandlers.get(message.clientName).out.println("[server] client:" + message.toClientName + " not connected");
             return ;
         }
-        String msg = "[" + message.fromClientName + "]: " + message.message;
+        String msg = "[" + message.clientName + "]: " + message.message;
         clientHandlers.get(message.toClientName).out.println(msg);
         String responseMsg = "[message delivered]";
-        clientHandlers.get(message.fromClientName).out.println(responseMsg);
+        clientHandlers.get(message.clientName).out.println(responseMsg);
     }
 
 }

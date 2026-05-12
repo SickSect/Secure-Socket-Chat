@@ -27,13 +27,13 @@ dependencies {
 // Apply a specific Java toolchain to ease working on different environments.
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(23)
     }
 }
 
 application {
     // Define the main class for the application.
-    mainClass = 'org.example.App'
+    mainClass = 'org.ugina.App'
 }
 
 tasks.named('test') {
@@ -45,7 +45,7 @@ tasks.register('runServer', JavaExec) {
     group = 'application'
     description = 'Run the echo server'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'org.example.server.EchoServer'
+    mainClass = 'org.ugina.server.ChatServer'
     standardInput = System.in
 }
 
@@ -53,6 +53,6 @@ tasks.register('runClient', JavaExec) {
     group = 'application'
     description = 'Run the echo client'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'org.example.client.EchoClient'
+    mainClass = 'org.ugina.client.EchoClient'
     standardInput = System.in
 }
