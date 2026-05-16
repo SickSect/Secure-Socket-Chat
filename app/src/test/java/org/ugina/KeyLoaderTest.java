@@ -1,7 +1,7 @@
 package org.ugina;
 
 import org.testng.annotations.Test;
-import org.ugina.crypto.Crypto;
+import org.ugina.crypto.AesCrypto;
 import org.ugina.crypto.CryptoException;
 import org.ugina.crypto.KeyLoader;
 import javax.crypto.SecretKey;
@@ -29,7 +29,7 @@ public class KeyLoaderTest {
         SecretKey key = KeyLoader.getSecretKey();
         assertNotNull(key);
         String plainText = "Hello World! Привет мир!";
-        String result = Crypto.encrypt(plainText, key);
+        String result = AesCrypto.encrypt(plainText, key);
         assertNotEquals(result, plainText);
     }
 

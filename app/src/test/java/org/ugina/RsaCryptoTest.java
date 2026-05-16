@@ -6,10 +6,8 @@ import org.ugina.crypto.RsaCrypto;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
-import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
-import java.util.Arrays;
 import java.util.Base64;
 
 import static org.testng.Assert.assertEquals;
@@ -22,14 +20,14 @@ public class RsaCryptoTest {
     {
         try {
             keyPair = RsaCrypto.generateKeyPair();
-        } catch (NoSuchAlgorithmException e) {
+        }catch (CryptoException e) {
             throw new RuntimeException(e);
         }
     }
     {
         try {
             keyPairOpt = RsaCrypto.generateKeyPair();
-        } catch (NoSuchAlgorithmException e) {
+        }catch (CryptoException e) {
             throw new RuntimeException(e);
         }
     }

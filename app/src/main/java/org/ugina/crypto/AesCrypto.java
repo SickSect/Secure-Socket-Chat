@@ -9,12 +9,17 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
 
-public class Crypto {
+public class AesCrypto {
     private static final int IV_LENGTH = 12;
     private static final int TAG_LENGTH_BITS = 128;
-    private static final String TRANSOFRMATION_STRING = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
+    private static final String TRANSOFRMATION_STRING = "AES/GCM/NoPadding";
 
     public static String encrypt(String plainText, SecretKey secretKey) throws CryptoException {
+        byte[]payload = encryptToByte(plainText, secretKey);
+        return Base64.getEncoder().encodeToString(payload);
+    }
+
+    public static byte[] encryptToByte(String plainText, SecretKey secretKey) throws CryptoException {
         try {
             byte[] iv = new byte[IV_LENGTH];
             new SecureRandom().nextBytes(iv);
@@ -28,15 +33,19 @@ public class Crypto {
             System.arraycopy(iv, 0, payload, 0, IV_LENGTH);
             System.arraycopy(cipherText, 0, payload, IV_LENGTH, cipherText.length);
 
-            return Base64.getEncoder().encodeToString(payload);
+            return payload;
         } catch (GeneralSecurityException e) {
             throw new CryptoException("Encryption failed", e);
         }
     }
 
     public static String decrypt(String cipherText, SecretKey secretKey) throws CryptoException {
+        byte[] payload = Base64.getDecoder().decode(cipherText);
+        return decryptFromBytes(payload, secretKey);
+    }
+
+    public static String decryptFromBytes(byte[] cipherTextBytes, SecretKey secretKey) throws CryptoException {
         try {
-            byte[] cipherTextBytes = Base64.getDecoder().decode(cipherText);
             byte[] iv = Arrays.copyOfRange(cipherTextBytes, 0, IV_LENGTH);
             byte[] payload = Arrays.copyOfRange(cipherTextBytes, IV_LENGTH, cipherTextBytes.length);
 

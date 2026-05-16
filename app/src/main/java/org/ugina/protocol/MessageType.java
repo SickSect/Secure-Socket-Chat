@@ -4,5 +4,6 @@ public enum MessageType {
     DELIVERED,
     DM,
     ERROR,
-    SYSTEM
+    SYSTEM,
+    PUBLIC_KEY
 }

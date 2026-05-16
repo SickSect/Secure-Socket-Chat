@@ -1,9 +1,10 @@
 package org.ugina.server;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ugina.crypto.Crypto;
-import org.ugina.protocol.ClientMessage;
-import org.ugina.protocol.CommandType;
+import org.ugina.crypto.AesCrypto;
+import org.ugina.crypto.RsaCrypto;
+import org.ugina.protocol.*;
 
 import javax.crypto.SecretKey;
 import java.io.BufferedReader;
@@ -11,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.security.PublicKey;
 
 public class ChatHandler implements Runnable{
 
@@ -40,25 +42,49 @@ public class ChatHandler implements Runnable{
             String line;
 
             while((line = in.readLine()) != null){
-                System.out.println("[ChatHandler] received: " + line);
-                String decryptedMsg = Crypto.decrypt(line, secretKey);
+                String decryptedMsg = AesCrypto.decrypt(line, secretKey);
                 ClientMessage msg = mapper.readValue(decryptedMsg, ClientMessage.class);
-                System.out.println("[ChatHandler] received decoded: " + msg.message + " " + msg.clientName +  " " + msg.commandType);
+                if (clientName == null && msg.commandType != CommandType.JOIN){
+                    System.err.println("[ChatHandler] protocol error: first message must be JOIN");
+                    return;
+                }
                 switch (msg.commandType){
                     case JOIN -> {
-                        System.out.println("[ChatHandler] client username: " + msg.message);
-                        room.joinClient(msg.message, this);
-                        clientName = msg.message;
+                        PublicKey pk;
+                        try{
+                            pk = RsaCrypto.publicKeyFromBase64(msg.publicKey);
+                        } catch(Exception ex){
+                            System.err.println("[ChatHandler] crypto error: [INVALID KEY FROM " + msg.username + "] " + ex.getMessage());
+                            break;
+                        }
+                        clientName = msg.username;
+                        System.out.println("[ChatHandler] client connected: " + msg.username);
+                        room.joinClient(msg.username, this, pk);
                     }
                     case QUIT -> {
                         System.out.println("[ChatHandler] client quit: " + clientName);
-                        room.leaveClient(clientName);
-                        break;
+                        return;
                     }
                     case SEND_MESSAGE -> {
                         System.out.println("[ChatHandler] send message: " + clientName);
-                        room.sendMessage(msg, clientName);
+                        //room.sendMessage(msg, clientName);
 
+                    }
+                    case GET_KEY -> {
+                        PublicKey key = room.getPublicKey(msg.toClientName);
+                        ServerMessage serverMessage = new ServerMessage();
+                        if (key == null){
+                            serverMessage.errorCode = ErrorCode.RECIPIENT_OFFLINE;
+                            serverMessage.type = MessageType.ERROR;
+                            serverMessage.text = "User: " + msg.toClientName + " not found";
+                        }
+                        else{
+                            serverMessage.type = MessageType.PUBLIC_KEY;
+                            serverMessage.username = msg.toClientName;
+                            serverMessage.publicKey = RsaCrypto.publicKeyToBase64(key);
+                        }
+                        System.out.println("[ChatHandler] get key: " + clientName);
+                        send(serverMessage);
                     }
                 }
             }
@@ -67,6 +93,16 @@ public class ChatHandler implements Runnable{
         }
         finally {
             room.leaveClient(clientName);
+        }
+    }
+
+    public void send(ServerMessage msg){
+        try{
+            String json = mapper.writeValueAsString(msg);
+            String encrypted = AesCrypto.encrypt(json, secretKey);
+            out.println(encrypted);
+        } catch (Exception e) {
+            System.err.println("[ChatHandler] send failed: " + e.getMessage());
         }
     }
 

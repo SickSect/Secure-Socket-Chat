@@ -11,13 +11,13 @@ public class RsaCrypto {
     private static final String ALGORITHM = "RSA";
     private static final int KEY_SIZE = 2048;
 
-    public static KeyPair generateKeyPair() throws NoSuchAlgorithmException {
+    public static KeyPair generateKeyPair() throws CryptoException {
         try{
             KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(ALGORITHM);
             keyPairGenerator.initialize(KEY_SIZE);
             return keyPairGenerator.generateKeyPair();
-        }catch(NoSuchAlgorithmException e){
-            throw new NoSuchAlgorithmException("Could not generate RSA key pair: " + e.getMessage());
+        }catch(GeneralSecurityException e){
+            throw new CryptoException("[CryptoException][RsaCrypto][encrypt]", e);
         }
     }
 
@@ -26,16 +26,8 @@ public class RsaCrypto {
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.ENCRYPT_MODE, secretKey);
             return cipher.doFinal(plainText);
-        } catch (NoSuchPaddingException e) {
-            throw new RuntimeException("[NoSuchPaddingException][RsaCrypto][encrypt] -" + e);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("[NoSuchAlgorithmException][RsaCrypto][encrypt] -" + e);
-        } catch (InvalidKeyException e) {
-            throw new RuntimeException("[InvalidKeyException][RsaCrypto][encrypt] -" + e);
-        } catch (IllegalBlockSizeException e) {
-            throw new RuntimeException("[IllegalBlockSizeException][RsaCrypto][encrypt] -" + e);
-        } catch (BadPaddingException e) {
-            throw new RuntimeException("[BadPaddingException][RsaCrypto][encrypt] -" + e);
+        } catch (GeneralSecurityException e) {
+            throw new CryptoException("[CryptoException][RsaCrypto][encrypt] -", e);
         }
     }
 
@@ -44,16 +36,8 @@ public class RsaCrypto {
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.DECRYPT_MODE, secretKey);
             return cipher.doFinal(cipherText);
-        } catch (NoSuchPaddingException e) {
-            throw new CryptoException("[NoSuchPaddingException][RsaCrypto][encrypt]", e);
-        } catch (NoSuchAlgorithmException e) {
-            throw new CryptoException("[NoSuchAlgorithmException][RsaCrypto][encrypt] -",e);
-        } catch (InvalidKeyException e) {
-            throw new CryptoException("[InvalidKeyException][RsaCrypto][encrypt] -",e);
-        } catch (IllegalBlockSizeException e) {
-            throw new CryptoException("[IllegalBlockSizeException][RsaCrypto][encrypt] -",e);
-        } catch (BadPaddingException e) {
-            throw new CryptoException("[BadPaddingException][RsaCrypto][encrypt] -",e);
+        } catch (Exception e) {
+            throw new CryptoException("[CryptoException][RsaCrypto][encrypt]", e);
         }
     }
 

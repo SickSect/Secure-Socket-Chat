@@ -1,6 +1,6 @@
 package org.ugina;
 
-import org.ugina.crypto.Crypto;
+import org.ugina.crypto.AesCrypto;
 import org.testng.annotations.Test;
 import org.ugina.crypto.CryptoException;
 
@@ -25,7 +25,7 @@ public class CipherTest {
 
         String plainText = "Hello World! Привет мир!";
 
-        String result = Crypto.encrypt(plainText, secretKey);
+        String result = AesCrypto.encrypt(plainText, secretKey);
         System.out.println("RESULT: " + result);
         assertNotEquals(result, plainText);
     }
@@ -35,8 +35,8 @@ public class CipherTest {
         SecretKey key = loadSecretKey(TEST_KEY_BASE64);
         String plainText = "Hello World! Привет мир!";
 
-        String encrypted = Crypto.encrypt(plainText, key);
-        String decrypted = Crypto.decrypt(encrypted, key);
+        String encrypted = AesCrypto.encrypt(plainText, key);
+        String decrypted = AesCrypto.decrypt(encrypted, key);
 
         assertEquals(decrypted, plainText);
     }
@@ -46,13 +46,13 @@ public class CipherTest {
         SecretKey secretKey = loadSecretKey(TEST_KEY_BASE64);
         String plainText = "Hello World! Привет мир!";
 
-        String encrypted_a = Crypto.encrypt(plainText, secretKey);
-        String encrypted_b = Crypto.encrypt(plainText, secretKey);
+        String encrypted_a = AesCrypto.encrypt(plainText, secretKey);
+        String encrypted_b = AesCrypto.encrypt(plainText, secretKey);
         System.out.println("encrypted_a: " + encrypted_a);
         System.out.println("encrypted_b: " + encrypted_b);
-        String decrypted_a = Crypto.decrypt(encrypted_a, secretKey);
+        String decrypted_a = AesCrypto.decrypt(encrypted_a, secretKey);
         System.out.println("decrypted_a: " + decrypted_a);
-        String decrypted_b = Crypto.decrypt(encrypted_b, secretKey);
+        String decrypted_b = AesCrypto.decrypt(encrypted_b, secretKey);
         System.out.println("decrypted_b: " + decrypted_b);
         assertNotEquals(encrypted_a, encrypted_b);
     }
@@ -62,10 +62,10 @@ public class CipherTest {
         SecretKey secretKey = loadSecretKey(TEST_KEY_BASE64);
         String plainText = "Hello World! Привет мир!";
 
-        String encrypted = Crypto.encrypt(plainText, secretKey);
+        String encrypted = AesCrypto.encrypt(plainText, secretKey);
         byte[] encryptBytes = encrypted.getBytes();
         encryptBytes[20] ^= 1;
         String tampered = Base64.getEncoder().encodeToString(encryptBytes);
-        String encryptTempered = Crypto.decrypt(tampered, secretKey);
+        String encryptTempered = AesCrypto.decrypt(tampered, secretKey);
     }
 }

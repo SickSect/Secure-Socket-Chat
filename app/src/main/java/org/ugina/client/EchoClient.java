@@ -1,9 +1,10 @@
 package org.ugina.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ugina.crypto.Crypto;
+import org.ugina.crypto.AesCrypto;
 import org.ugina.crypto.CryptoException;
 import org.ugina.crypto.KeyLoader;
+import org.ugina.crypto.RsaCrypto;
 import org.ugina.protocol.ClientMessage;
 import org.ugina.protocol.CommandType;
 import org.ugina.protocol.ServerMessage;
@@ -12,13 +13,19 @@ import javax.crypto.SecretKey;
 import java.io.*;
 import java.net.Socket;
 import java.security.GeneralSecurityException;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class EchoClient {
     private static final String HOST = "localhost";
     private static final int PORT = 5000;
     private static final SecretKey KEY;
     private static final ObjectMapper mapper = new ObjectMapper();
-
+    private static ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
     static {
         try {
             KEY = KeyLoader.getSecretKey();
@@ -27,8 +34,12 @@ public class EchoClient {
         }
     }
 
-
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, CryptoException {
+        // KEY GENERATION BEFORE START
+        KeyPair pair = RsaCrypto.generateKeyPair();
+        PublicKey publicKey = pair.getPublic();
+        PrivateKey privateKey = pair.getPrivate();
+        // CONNECTION
         try (Socket socket = new Socket(HOST, PORT);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
@@ -41,7 +52,7 @@ public class EchoClient {
                 try {
                     String line;
                     while ((line = in.readLine()) != null) {
-                        String decoded = Crypto.decrypt(line, KEY);
+                        String decoded = AesCrypto.decrypt(line, KEY);
                         ServerMessage msg = mapper.readValue(decoded, ServerMessage.class);
 
                         switch (msg.type) {
@@ -49,6 +60,15 @@ public class EchoClient {
                             case DELIVERED -> System.out.println("[delivered]");
                             case ERROR -> System.out.println("[error: " + msg.errorCode + "] " + msg.text);
                             case SYSTEM -> System.out.println("[server] " + msg.text);
+                            case PUBLIC_KEY -> {
+                                try{
+                                    PublicKey recievedKey = RsaCrypto.publicKeyFromBase64(msg.publicKey);
+                                    keyCache.put(msg.username, recievedKey);
+                                    System.out.println("[client] got public key for " + msg.username);
+                                } catch (Exception e) {
+                                    System.err.println("[client] failed to parse public key: " + e.getMessage());
+                                }
+                            }
                         }
                     }
                 } catch (IOException e) {
@@ -65,8 +85,8 @@ public class EchoClient {
             String clientName = stdin.readLine();
             ClientMessage joinMessage = new ClientMessage();
             joinMessage.commandType = CommandType.JOIN;
-            joinMessage.clientName = clientName;
-            joinMessage.message = clientName;
+            joinMessage.username = clientName;
+            joinMessage.publicKey = RsaCrypto.publicKeyToBase64(publicKey);
             out.println(ClientCipherService.encodeMessage(joinMessage));
 
             while (true) {
@@ -75,9 +95,6 @@ public class EchoClient {
                 if (cmd == null || "/quit".equals(cmd)) {
                     ClientMessage quitMsg = new ClientMessage();
                     quitMsg.commandType = CommandType.QUIT;
-                    quitMsg.clientName = clientName;
-                    quitMsg.toClientName = null;
-                    quitMsg.message = null;
                     out.println(ClientCipherService.encodeMessage(quitMsg));
                     break;
                 }
@@ -87,9 +104,8 @@ public class EchoClient {
                     System.out.println("[client] Enter message:");
                     String text = stdin.readLine();
                     ClientMessage msg = new ClientMessage();
-                    msg.clientName = clientName;
                     msg.toClientName = receiver;
-                    msg.message = text;
+                    //msg.message = text;
                     msg.commandType = CommandType.SEND_MESSAGE;
                     out.println(ClientCipherService.encodeMessage(msg));
                 }
