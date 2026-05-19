@@ -36,4 +36,8 @@ public class ReceiveMsgService {
         }
         return null;
     }
+
+    public static void receivedERROR(ServerMessage receivedMsg) throws CryptoException {
+
+    }
 }

@@ -1,6 +1,5 @@
 package org.ugina.server;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ugina.crypto.AesCrypto;
 import org.ugina.crypto.RsaCrypto;
@@ -18,80 +17,42 @@ public class ChatHandler implements Runnable {
 
     private final Socket clientSocket;
     private final ChatRoom room;
-    public PrintWriter out;
-    public BufferedReader in;
-    private String clientName = null;
+    private final SecretKey pskKey;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SecretKey secretKey;
+    private PrintWriter out;
+    private BufferedReader in;
+    private String clientName = null;
 
-
-    public ChatHandler(Socket clientSocket, ChatRoom chatRoom, SecretKey secretKey) throws IOException {
+    public ChatHandler(Socket clientSocket, ChatRoom room, SecretKey pskKey) {
         this.clientSocket = clientSocket;
-        this.secretKey = secretKey;
-        room = chatRoom;
+        this.room = room;
+        this.pskKey = pskKey;
     }
 
     @Override
     public void run() {
         try {
-
             in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             out = new PrintWriter(clientSocket.getOutputStream(), true);
             System.out.println("[ChatHandler] client connected: " + clientSocket.getRemoteSocketAddress());
 
-
             String line;
-
             while ((line = in.readLine()) != null) {
-                String decryptedMsg = AesCrypto.decrypt(line, secretKey);
-                ClientMessage msg = mapper.readValue(decryptedMsg, ClientMessage.class);
+                String decrypted = AesCrypto.decrypt(line, pskKey);
+                ClientMessage msg = mapper.readValue(decrypted, ClientMessage.class);
+
                 if (clientName == null && msg.commandType != CommandType.JOIN) {
                     System.err.println("[ChatHandler] protocol error: first message must be JOIN");
                     return;
                 }
+
                 switch (msg.commandType) {
-                    case JOIN -> {
-                        PublicKey pk;
-                        try {
-                            pk = RsaCrypto.publicKeyFromBase64(msg.publicKey);
-                        } catch (Exception ex) {
-                            System.err.println("[ChatHandler] crypto error: [INVALID KEY FROM " + msg.username + "] " + ex.getMessage());
-                            break;
-                        }
-                        clientName = msg.username;
-                        System.out.println("[ChatHandler] client connected: " + msg.username);
-                        room.joinClient(msg.username, this, pk);
-                    }
+                    case JOIN -> handleJoin(msg);
+                    case SEND_MESSAGE -> handleSendMessage(msg);
+                    case GET_KEY -> handleGetKey(msg);
                     case QUIT -> {
                         System.out.println("[ChatHandler] client quit: " + clientName);
                         return;
-                    }
-                    case SEND_MESSAGE -> {
-                        ErrorCode errorCode = ServerHandlerService.validateSendMessage(msg, room);
-                        if (errorCode != null) {
-                            ServerMessage serverMessage = new ServerMessage();
-                            serverMessage.type = MessageType.ERROR;
-                            serverMessage.errorCode = errorCode;
-                            serverMessage.text = errorCode == ErrorCode.EXPIRED ? "Message expired" : "Replay detected";
-                            send(serverMessage);
-                        } else {
-                            room.sendMessage(msg, clientName);
-                        }
-                    }
-                    case GET_KEY -> {
-                        PublicKey key = room.getPublicKey(msg.toClientName);
-                        ServerMessage serverMessage = new ServerMessage();
-                        if (key == null) {
-                            serverMessage.errorCode = ErrorCode.RECIPIENT_OFFLINE;
-                            serverMessage.type = MessageType.ERROR;
-                            serverMessage.text = "User: " + msg.toClientName + " not found";
-                        } else {
-                            serverMessage.type = MessageType.PUBLIC_KEY;
-                            serverMessage.username = msg.toClientName;
-                            serverMessage.publicKey = RsaCrypto.publicKeyToBase64(key);
-                        }
-                        System.out.println("[ChatHandler] get key: " + clientName);
-                        send(serverMessage);
                     }
                 }
             }
@@ -102,14 +63,47 @@ public class ChatHandler implements Runnable {
         }
     }
 
+    private void handleJoin(ClientMessage msg) {
+        PublicKey pk;
+        try {
+            pk = RsaCrypto.publicKeyFromBase64(msg.publicKey);
+        } catch (Exception e) {
+            send(ServerMessage.error(ErrorCode.INVALID_PUBLIC_KEY, "Invalid public key"));
+            return;
+        }
+        clientName = msg.username;
+        room.joinClient(msg.username, this, pk);
+        System.out.println("[ChatHandler] joined: " + msg.username);
+    }
+
+    private void handleSendMessage(ClientMessage msg) throws IOException {
+        ErrorCode error = ServerHandlerService.validateSendMessage(msg, room);
+        if (error != null) {
+            String text = error == ErrorCode.EXPIRED ? "Message expired" : "Replay detected";
+            send(ServerMessage.error(error, text));
+            return;
+        }
+        room.sendMessage(msg, clientName);
+    }
+
+    private void handleGetKey(ClientMessage msg) {
+        PublicKey key = room.getPublicKey(msg.toClientName);
+        if (key == null) {
+            send(ServerMessage.error(ErrorCode.RECIPIENT_OFFLINE,
+                    "User " + msg.toClientName + " not found"));
+            return;
+        }
+        send(ServerMessage.publicKey(msg.toClientName, RsaCrypto.publicKeyToBase64(key)));
+        System.out.println("[ChatHandler] sent public key of " + msg.toClientName + " to " + clientName);
+    }
+
     public void send(ServerMessage msg) {
         try {
             String json = mapper.writeValueAsString(msg);
-            String encrypted = AesCrypto.encrypt(json, secretKey);
+            String encrypted = AesCrypto.encrypt(json, pskKey);
             out.println(encrypted);
         } catch (Exception e) {
             System.err.println("[ChatHandler] send failed: " + e.getMessage());
         }
     }
-
 }

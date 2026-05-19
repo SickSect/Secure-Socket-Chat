@@ -53,6 +53,6 @@ tasks.register('runClient', JavaExec) {
     group = 'application'
     description = 'Run the echo client'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'org.ugina.client.EchoClient'
+    mainClass = 'org.ugina.client.ChatClient'
     standardInput = System.in
 }

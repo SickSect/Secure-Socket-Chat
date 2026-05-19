@@ -53,7 +53,8 @@ public class ChatRoom {
 
 
     public void leaveClient(String clientName) {
-        System.out.println("[leaveClient] client connected: " + clientName);
+        if (clientName == null) return;
+        System.out.println("[leaveClient] " + clientName + " left");
         clientHandlers.remove(clientName);
         clientPublicKeys.remove(clientName);
     }
@@ -93,7 +94,7 @@ public class ChatRoom {
         try {
             String json = mapper.writeValueAsString(msg);
             String encrypted = AesCrypto.encrypt(json, secretKey);
-            handler.out.println(encrypted);
+            handler.send(msg);
         } catch (Exception e) {
             System.err.println("[ChatRoom] send failed: " + e.getMessage());
         }
