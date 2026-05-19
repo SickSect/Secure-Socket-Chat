@@ -14,7 +14,7 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.security.PublicKey;
 
-public class ChatHandler implements Runnable{
+public class ChatHandler implements Runnable {
 
     private final Socket clientSocket;
     private final ChatRoom room;
@@ -24,6 +24,7 @@ public class ChatHandler implements Runnable{
     private final ObjectMapper mapper = new ObjectMapper();
     private final SecretKey secretKey;
 
+
     public ChatHandler(Socket clientSocket, ChatRoom chatRoom, SecretKey secretKey) throws IOException {
         this.clientSocket = clientSocket;
         this.secretKey = secretKey;
@@ -32,7 +33,7 @@ public class ChatHandler implements Runnable{
 
     @Override
     public void run() {
-        try{
+        try {
 
             in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             out = new PrintWriter(clientSocket.getOutputStream(), true);
@@ -41,19 +42,19 @@ public class ChatHandler implements Runnable{
 
             String line;
 
-            while((line = in.readLine()) != null){
+            while ((line = in.readLine()) != null) {
                 String decryptedMsg = AesCrypto.decrypt(line, secretKey);
                 ClientMessage msg = mapper.readValue(decryptedMsg, ClientMessage.class);
-                if (clientName == null && msg.commandType != CommandType.JOIN){
+                if (clientName == null && msg.commandType != CommandType.JOIN) {
                     System.err.println("[ChatHandler] protocol error: first message must be JOIN");
                     return;
                 }
-                switch (msg.commandType){
+                switch (msg.commandType) {
                     case JOIN -> {
                         PublicKey pk;
-                        try{
+                        try {
                             pk = RsaCrypto.publicKeyFromBase64(msg.publicKey);
-                        } catch(Exception ex){
+                        } catch (Exception ex) {
                             System.err.println("[ChatHandler] crypto error: [INVALID KEY FROM " + msg.username + "] " + ex.getMessage());
                             break;
                         }
@@ -66,19 +67,25 @@ public class ChatHandler implements Runnable{
                         return;
                     }
                     case SEND_MESSAGE -> {
-                        System.out.println("[ChatHandler] send message: " + clientName);
-                        //room.sendMessage(msg, clientName);
-
+                        ErrorCode errorCode = ServerHandlerService.validateSendMessage(msg, room);
+                        if (errorCode != null) {
+                            ServerMessage serverMessage = new ServerMessage();
+                            serverMessage.type = MessageType.ERROR;
+                            serverMessage.errorCode = errorCode;
+                            serverMessage.text = errorCode == ErrorCode.EXPIRED ? "Message expired" : "Replay detected";
+                            send(serverMessage);
+                        } else {
+                            room.sendMessage(msg, clientName);
+                        }
                     }
                     case GET_KEY -> {
                         PublicKey key = room.getPublicKey(msg.toClientName);
                         ServerMessage serverMessage = new ServerMessage();
-                        if (key == null){
+                        if (key == null) {
                             serverMessage.errorCode = ErrorCode.RECIPIENT_OFFLINE;
                             serverMessage.type = MessageType.ERROR;
                             serverMessage.text = "User: " + msg.toClientName + " not found";
-                        }
-                        else{
+                        } else {
                             serverMessage.type = MessageType.PUBLIC_KEY;
                             serverMessage.username = msg.toClientName;
                             serverMessage.publicKey = RsaCrypto.publicKeyToBase64(key);
@@ -88,16 +95,15 @@ public class ChatHandler implements Runnable{
                     }
                 }
             }
-        }catch (Exception e){
+        } catch (Exception e) {
             System.out.println("[ChatHandler] client disconnected: " + clientSocket.getRemoteSocketAddress());
-        }
-        finally {
+        } finally {
             room.leaveClient(clientName);
         }
     }
 
-    public void send(ServerMessage msg){
-        try{
+    public void send(ServerMessage msg) {
+        try {
             String json = mapper.writeValueAsString(msg);
             String encrypted = AesCrypto.encrypt(json, secretKey);
             out.println(encrypted);

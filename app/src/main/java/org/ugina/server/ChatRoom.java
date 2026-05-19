@@ -11,16 +11,31 @@ import javax.crypto.SecretKey;
 import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class ChatRoom {
     private ConcurrentHashMap<String, ChatHandler> clientHandlers = new ConcurrentHashMap<>();
-    //private ConcurrentHashMap<String ,ClientStatus> clientStatuses = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, PublicKey> clientPublicKeys = new ConcurrentHashMap<>();
     private final ObjectMapper mapper = new ObjectMapper();
     private SecretKey secretKey;
+    private final ConcurrentHashMap<String, Long> nonces = new ConcurrentHashMap<>();
+    private static final long NONCE_TTL_MS = 60_000;
 
     public ChatRoom() throws GeneralSecurityException {
         secretKey = KeyLoader.getSecretKey();
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor( r -> {
+            Thread thread = new Thread( r, "nonce-cleaner" );
+            thread.setDaemon( true );
+            return thread;
+        });
+        scheduler.scheduleAtFixedRate(this::cleanupNonces, 1, 1, TimeUnit.MINUTES);
+    }
+
+    private void cleanupNonces() {
+        long now = System.currentTimeMillis();
+        nonces.entrySet().removeIf(e -> e.getValue() < now);
     }
 
     public boolean joinClient(String clientName, ChatHandler chatHandler, PublicKey key){
@@ -31,21 +46,6 @@ public class ChatRoom {
             return false;
         }
         clientPublicKeys.putIfAbsent(clientName, key);
-/*        if (status == null) {
-            clientStatuses.putIfAbsent(clientName, ClientStatus.ONLINE);
-        }else{
-            if (status == ClientStatus.BLOCKED){
-                ClientMessage clientMessage = new ClientMessage();
-                clientMessage.commandType = CommandType.SEND_MESSAGE;
-                clientMessage.toClientName = clientName;
-                clientMessage.message = "You are blocked!";
-                clientMessage.clientName = "System";
-                sendMessage(clientMessage, clientName);
-                return false;
-            }else{
-                clientStatuses.replace(clientName, ClientStatus.ONLINE);
-            }
-        }*/
         System.out.println("[joinClient] " + clientName + " joined");
         return true;
     }
@@ -56,30 +56,36 @@ public class ChatRoom {
         System.out.println("[leaveClient] client connected: " + clientName);
         clientHandlers.remove(clientName);
         clientPublicKeys.remove(clientName);
-        //clientStatuses.replace(clientName, ClientStatus.OFFLINE);
     }
 
-    private ServerMessage createServerMessage(String fromClientName, String text, ErrorCode errorCode, MessageType type) {
-        ServerMessage serverMessage = new ServerMessage();
-        serverMessage.fromClientName = fromClientName;
-        serverMessage.text = text;
-        serverMessage.type = type;
-        serverMessage.errorCode = errorCode;
-        return serverMessage;
+    public boolean checkAndAddNonce(String nonce){
+        long now = System.currentTimeMillis();
+        Long previous = nonces.putIfAbsent(nonce, now + NONCE_TTL_MS);
+        return previous == null;
     }
 
-    public void sendMessage(ClientMessage message, String clientName) {
-        ChatHandler recipient = clientHandlers.get(message.toClientName);
-        ChatHandler sender = clientHandlers.get(clientName);
 
-        if (recipient == null) {
-            sendTo(sender, createServerMessage(null, "User offline",
-                    ErrorCode.RECIPIENT_OFFLINE, MessageType.ERROR));
-            return;
+    public void sendMessage(ClientMessage clientMessage, String clientName) {
+        ChatHandler recipient = clientHandlers.get(clientMessage.toClientName);
+        ChatHandler client = clientHandlers.get(clientName);
+        if (recipient == null){
+            ServerMessage error = new ServerMessage();
+            error.type = MessageType.ERROR;
+            error.errorCode = ErrorCode.RECIPIENT_OFFLINE;
+            error.text = "[ERROR] " + clientMessage.toClientName + " not connected";
+            sendTo(client, error);
+            return ;
         }
 
-        //sendTo(recipient, createServerMessage(clientName, message.message, null, MessageType.DM));
-        sendTo(sender, createServerMessage(null, "delivered", null, MessageType.DELIVERED));
+        ServerMessage dm = new ServerMessage();
+        dm.type = MessageType.DM;
+        dm.e2ePayload = clientMessage.e2ePayload;
+        dm.fromClientName = clientName;
+        sendTo(recipient, dm);
+
+        ServerMessage approve = new ServerMessage();
+        approve.type = MessageType.DELIVERED;
+        sendTo(client, approve);
     }
 
     private void sendTo(ChatHandler handler, ServerMessage msg) {
