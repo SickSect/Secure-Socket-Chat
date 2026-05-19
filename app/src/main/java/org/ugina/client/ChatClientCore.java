@@ -2,10 +2,7 @@ package org.ugina.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ugina.crypto.AesCrypto;
-import org.ugina.crypto.CryptoException;
-import org.ugina.crypto.HybridCrypto;
-import org.ugina.crypto.RsaCrypto;
+import org.ugina.crypto.*;
 import org.ugina.protocol.ClientMessage;
 import org.ugina.protocol.ErrorCode;
 import org.ugina.protocol.ServerMessage;
@@ -15,10 +12,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.security.KeyPair;
-import java.security.PrivateKey;
-import java.security.PublicKey;
-import java.security.SecureRandom;
+import java.security.*;
 import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,12 +40,11 @@ public class ChatClientCore {
     public ChatClientCore(
             ChatEventListener listener,
             String host,
-            int port,
-            SecretKey pskKey) {
+            int port) throws GeneralSecurityException {
         this.listener = listener;
         HOST = host;
         PORT = port;
-        PSK_KEY = pskKey;
+        PSK_KEY = KeyLoader.getSecretKey();
     }
 
     /**
