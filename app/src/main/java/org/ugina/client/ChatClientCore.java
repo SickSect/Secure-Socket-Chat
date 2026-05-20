@@ -63,10 +63,10 @@ public class ChatClientCore {
         publicKey = keyPair.getPublic();
         privateKey = keyPair.getPrivate();
 
-        try (Socket socket = new Socket(HOST, PORT)) {
-            socketCache = socket;
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            out = new PrintWriter(socket.getOutputStream(), true);
+        try {
+            socketCache = new Socket(HOST, PORT);
+            in = new BufferedReader(new InputStreamReader(socketCache.getInputStream()));
+            out = new PrintWriter(socketCache.getOutputStream(), true);
             stdin = new BufferedReader(new InputStreamReader(System.in));
 
         } catch (Exception e) {
@@ -147,11 +147,7 @@ public class ChatClientCore {
     }
 
     private void handleSYSTEM(ServerMessage msg) {
-        try{
-            listener.onError(msg.errorCode.name(), msg.text);
-        }catch (Exception e) {
-            listener.onError("SYSTEM_ERROR", e.toString());
-        }
+        listener.onSystem(msg.text);
     }
 
     private void handleDM(ServerMessage msg) {

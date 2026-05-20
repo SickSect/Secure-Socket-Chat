@@ -29,7 +29,7 @@ public class ClientMessage {
     }
 
     public static ClientMessage getKey(String recipient){
-        return new ClientMessage.Builder().commandType(CommandType.GET_KEY).username(recipient).build();
+        return new Builder().commandType(CommandType.GET_KEY).toClientName(recipient).build();
     }
 
     public static ClientMessage message(String recipient, String nonce, String e2ePayload){
