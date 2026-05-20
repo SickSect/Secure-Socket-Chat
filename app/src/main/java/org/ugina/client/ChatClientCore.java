@@ -142,7 +142,15 @@ public class ChatClientCore {
             case DELIVERED -> handleDELIVERED(msg);
             case ERROR -> handleERROR(msg);
             case PUBLIC_KEY -> handlePUBLIC_KEY(msg);
-            case SYSTEM -> System.out.println("[SYSTEM] " + msg);
+            case SYSTEM -> handleSYSTEM(msg);
+        }
+    }
+
+    private void handleSYSTEM(ServerMessage msg) {
+        try{
+            listener.onError(msg.errorCode.name(), msg.text);
+        }catch (Exception e) {
+            listener.onError("SYSTEM_ERROR", e.toString());
         }
     }
 
