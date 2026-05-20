@@ -29,13 +29,20 @@ public class ConsoleTui implements ChatEventListener {
                 System.out.println("Empty name, exiting");
                 return;
             }
-
-            core.connect(name);
+            boolean joined = core.connect(name);
+            if (!joined){
+                System.out.println("Could not connect — name may be taken or server unreachable");
+                return;
+            }
 
             String input;
             while ((input = stdin.readLine()) != null) {
                 if (input.isBlank()) continue;
-                if (!handleInput(input)) break;
+                try {
+                    if (!handleInput(input)) break;
+                } catch (Exception e) {
+                    System.err.println("[client] error: " + e.getMessage());
+                }
             }
         } finally {
             core.disconnect();

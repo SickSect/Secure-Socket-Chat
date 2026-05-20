@@ -14,9 +14,7 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.security.*;
 import java.util.Base64;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class ChatClientCore {
     ChatEventListener listener;
@@ -27,6 +25,7 @@ public class ChatClientCore {
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, CompletableFuture<PublicKey>> pendingKeyRequests = new ConcurrentHashMap<>();
+    private CompletableFuture<Boolean> joinResult;
 
     private PublicKey publicKey;
     private PrivateKey privateKey;
@@ -52,7 +51,7 @@ public class ChatClientCore {
      *
      * @param username - client username
      */
-    public void connect(String username) throws CryptoException, JsonProcessingException {
+    public boolean connect(String username) throws CryptoException, JsonProcessingException {
         KeyPair keyPair;
         try {
             keyPair = RsaCrypto.generateKeyPair();
@@ -73,8 +72,14 @@ public class ChatClientCore {
             System.err.println("[ERROR] Could not connect to server!");
             throw new RuntimeException("[ERROR] Could not connect to server!");
         }
+        joinResult = new CompletableFuture<>();
         startReaderThread();
         sendRaw(ClientMessage.join(username, publicKey));
+        try {
+            return joinResult.get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public void disconnect() {
@@ -147,6 +152,9 @@ public class ChatClientCore {
     }
 
     private void handleSYSTEM(ServerMessage msg) {
+        if (joinResult.isDone() && joinResult != null) {
+            joinResult.complete(true);
+        }
         listener.onSystem(msg.text);
     }
 
@@ -168,6 +176,9 @@ public class ChatClientCore {
     }
 
     private void handleERROR(ServerMessage msg) {
+        if (joinResult.isDone() && joinResult != null){
+            joinResult.complete(true);
+        }
         try {
             listener.onError(msg.errorCode != null ? msg.errorCode.name() : "UNKNOWN", msg.text);
         } catch (Exception e) {

@@ -71,8 +71,13 @@ public class ChatHandler implements Runnable {
             send(ServerMessage.error(ErrorCode.INVALID_PUBLIC_KEY, "Invalid public key"));
             return;
         }
+        boolean joined = room.joinClient(msg.username, this, pk);
+        if (!joined) {
+            send(ServerMessage.error(ErrorCode.NAME_TAKEN, msg.username + " is already in use"));
+            return;
+        }
         clientName = msg.username;
-        room.joinClient(msg.username, this, pk);
+        send(ServerMessage.system("Welcome, " + msg.username));
         System.out.println("[ChatHandler] joined: " + msg.username);
     }
 
