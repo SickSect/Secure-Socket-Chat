@@ -29,7 +29,16 @@ public class ConsoleTui implements ChatEventListener {
                 System.out.println("Empty name, exiting");
                 return;
             }
-            boolean joined = core.connect(name);
+
+            System.out.print("Password (for protecting your identity key): ");
+            String passwordLine = stdin.readLine();
+            if (passwordLine == null || passwordLine.isBlank()) {
+                System.out.println("Empty password, exiting");
+                return;
+            }
+            char[] password = passwordLine.toCharArray();
+
+            boolean joined = core.connect(name, password);
             if (!joined){
                 System.out.println("Could not connect — name may be taken or server unreachable");
                 return;

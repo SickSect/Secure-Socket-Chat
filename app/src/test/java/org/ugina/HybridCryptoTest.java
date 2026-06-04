@@ -2,7 +2,7 @@ package org.ugina;
 
 import org.testng.Assert;
 import org.testng.annotations.Test;
-import org.ugina.crypto.CryptoException;
+import org.ugina.crypto.exception.CryptoException;
 import org.ugina.crypto.HybridCrypto;
 import org.ugina.crypto.RsaCrypto;
 

@@ -1,5 +1,7 @@
 package org.ugina.crypto;
 
+import org.ugina.crypto.exception.CryptoException;
+
 import javax.crypto.*;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;

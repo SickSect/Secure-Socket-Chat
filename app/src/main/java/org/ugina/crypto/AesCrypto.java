@@ -1,5 +1,7 @@
 package org.ugina.crypto;
 
+import org.ugina.crypto.exception.CryptoException;
+
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;

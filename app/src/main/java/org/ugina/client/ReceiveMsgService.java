@@ -1,6 +1,6 @@
 package org.ugina.client;
 
-import org.ugina.crypto.CryptoException;
+import org.ugina.crypto.exception.CryptoException;
 import org.ugina.crypto.HybridCrypto;
 import org.ugina.crypto.RsaCrypto;
 import org.ugina.protocol.ServerMessage;

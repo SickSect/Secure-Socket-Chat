@@ -19,18 +19,18 @@ public class KeyLoader {
         Properties prop = new Properties();
         try(InputStream input = KeyLoader.class.getClassLoader()
                 .getResourceAsStream(CONFIG_FILE)) {
-            if (input == null) {
+            if (input == null)
                 throw new IOException("Could not find " + CONFIG_FILE);
-            }
+
             prop.load(input);
             String base64Key = prop.getProperty(KEY_FILE);
-            if (base64Key == null || base64Key.isBlank()) {
+            if (base64Key == null || base64Key.isBlank())
                 throw new IOException("Could not find " + KEY_FILE);
-            }
+
             byte[] decodedKey = Base64.getDecoder().decode(base64Key);
-            if (decodedKey.length != 32) {
+            if (decodedKey.length != 32)
                 throw new IOException("Invalid AES-256 key length: " + decodedKey.length + " (expected 32)");
-            }
+
             return new SecretKeySpec(decodedKey, "AES");
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);

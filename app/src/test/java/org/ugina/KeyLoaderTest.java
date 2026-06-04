@@ -2,7 +2,7 @@ package org.ugina;
 
 import org.testng.annotations.Test;
 import org.ugina.crypto.AesCrypto;
-import org.ugina.crypto.CryptoException;
+import org.ugina.crypto.exception.CryptoException;
 import org.ugina.crypto.KeyLoader;
 import javax.crypto.SecretKey;
 import java.security.GeneralSecurityException;

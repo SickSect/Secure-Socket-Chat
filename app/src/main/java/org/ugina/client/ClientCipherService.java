@@ -3,12 +3,10 @@ package org.ugina.client;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ugina.crypto.AesCrypto;
-import org.ugina.crypto.CryptoException;
 import org.ugina.crypto.KeyLoader;
 import org.ugina.protocol.ClientMessage;
 
 import javax.crypto.SecretKey;
-import java.security.GeneralSecurityException;
 
 public class ClientCipherService {
     private static final ObjectMapper mapper = new ObjectMapper();

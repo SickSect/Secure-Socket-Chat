@@ -1,9 +1,7 @@
 package org.ugina.server;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ugina.crypto.AesCrypto;
-import org.ugina.crypto.CryptoException;
 import org.ugina.crypto.KeyLoader;
 import org.ugina.protocol.*;
 

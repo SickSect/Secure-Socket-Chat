@@ -1,4 +1,4 @@
-package org.ugina.crypto;
+package org.ugina.crypto.exception;
 
 public class CryptoException extends Exception {
     public CryptoException(String message, Throwable cause) {

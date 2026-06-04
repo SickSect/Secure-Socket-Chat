@@ -1,10 +1,9 @@
 package org.ugina.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import org.ugina.crypto.CryptoException;
+import org.ugina.crypto.exception.CryptoException;
 import org.ugina.crypto.HybridCrypto;
 import org.ugina.protocol.ClientMessage;
-import org.ugina.protocol.CommandType;
 
 import java.io.PrintWriter;
 import java.security.PublicKey;

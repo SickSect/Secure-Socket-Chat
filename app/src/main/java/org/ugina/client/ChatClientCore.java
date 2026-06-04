@@ -3,6 +3,9 @@ package org.ugina.client;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ugina.crypto.*;
+import org.ugina.crypto.exception.CryptoException;
+import org.ugina.crypto.keyStorage.FileBasedKeyStorage;
+import org.ugina.crypto.keyStorage.KeyStorage;
 import org.ugina.protocol.ClientMessage;
 import org.ugina.protocol.ErrorCode;
 import org.ugina.protocol.ServerMessage;
@@ -12,6 +15,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.nio.file.Path;
 import java.security.*;
 import java.util.Base64;
 import java.util.concurrent.*;
@@ -22,6 +26,8 @@ public class ChatClientCore {
     private final String HOST;
     private final int PORT;
     private final SecretKey PSK_KEY;
+    private KeyStorage keyStorage;
+
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, CompletableFuture<PublicKey>> pendingKeyRequests = new ConcurrentHashMap<>();
@@ -51,14 +57,14 @@ public class ChatClientCore {
      *
      * @param username - client username
      */
-    public boolean connect(String username) throws CryptoException, JsonProcessingException {
-        KeyPair keyPair;
-        try {
-            keyPair = RsaCrypto.generateKeyPair();
-        } catch (Exception e) {
-            System.err.println("[ERROR] Could not generate RSA keys!");
-            throw new RuntimeException("[ERROR] Could not generate RSA keys!");
-        }
+    public boolean connect(String username, char[] password) throws Exception {
+        Path keyFile = Path.of(
+                System.getProperty("user.home"),
+                ".secure-chat",
+                username + ".key"
+        );
+        keyStorage = new FileBasedKeyStorage(keyFile);
+        KeyPair keyPair = loadOrCreateKeys(password);
         publicKey = keyPair.getPublic();
         privateKey = keyPair.getPrivate();
 
@@ -79,6 +85,16 @@ public class ChatClientCore {
             return joinResult.get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private KeyPair loadOrCreateKeys(char[] password) throws Exception {
+        if (keyStorage.exists())
+            return keyStorage.load(password);
+        else {
+            KeyPair keyPair = RsaCrypto.generateKeyPair();
+            keyStorage.save(keyPair, password);
+            return keyPair;
         }
     }
 
@@ -152,7 +168,7 @@ public class ChatClientCore {
     }
 
     private void handleSYSTEM(ServerMessage msg) {
-        if (joinResult.isDone() && joinResult != null) {
+        if (!joinResult.isDone() && joinResult != null) {
             joinResult.complete(true);
         }
         listener.onSystem(msg.text);
@@ -176,8 +192,8 @@ public class ChatClientCore {
     }
 
     private void handleERROR(ServerMessage msg) {
-        if (joinResult.isDone() && joinResult != null){
-            joinResult.complete(true);
+        if (!joinResult.isDone() && joinResult != null){
+            joinResult.complete(false);
         }
         try {
             listener.onError(msg.errorCode != null ? msg.errorCode.name() : "UNKNOWN", msg.text);
