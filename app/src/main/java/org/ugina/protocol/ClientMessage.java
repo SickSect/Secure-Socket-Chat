@@ -12,6 +12,8 @@ public class ClientMessage {
     public String e2ePayload;        // для SEND_MESSAGE (Base64)
     public Long timestamp;           // для SEND_MESSAGE
     public String nonce;             // для SEND_MESSAGE (Base64)
+    public String ephemeralPublicKey;
+    public String signature;
 
     public ClientMessage() {
     }
@@ -42,6 +44,24 @@ public class ClientMessage {
                 .build();
     }
 
+    public static ClientMessage initSession(String toName, String ephemeralPubBase64, String signatureBase64) {
+        return new Builder()
+                .commandType(CommandType.INIT_SESSION)
+                .toClientName(toName)
+                .ephemeralPublicKey(ephemeralPubBase64)
+                .signature(signatureBase64)
+                .build();
+    }
+
+    public static ClientMessage sessionAck(String toName, String ephemeralPubBase64, String signatureBase64) {
+        return new Builder()
+                .commandType(CommandType.SESSION_ASK)
+                .toClientName(toName)
+                .ephemeralPublicKey(ephemeralPubBase64)
+                .signature(signatureBase64)
+                .build();
+    }
+
     public ClientMessage(Builder builder) {
         this.commandType = builder.commandType;
         this.username = builder.username;
@@ -50,6 +70,8 @@ public class ClientMessage {
         this.e2ePayload = builder.e2ePayload;
         this.timestamp = builder.timestamp;
         this.nonce = builder.nonce;
+        this.signature = builder.signature;
+        this.ephemeralPublicKey = builder.ephemeralPublicKey;
     }
 
 
@@ -61,6 +83,9 @@ public class ClientMessage {
         public String e2ePayload;        // для SEND_MESSAGE (Base64)
         public Long timestamp;           // для SEND_MESSAGE
         public String nonce;             // для SEND_MESSAGE (Base64)
+        public String ephemeralPublicKey;
+        public String signature;
+
 
         public ClientMessage build() {
             return new ClientMessage(this);
@@ -98,6 +123,17 @@ public class ClientMessage {
 
         public Builder nonce(String nonce) {
             this.nonce = nonce;
+            return this;
+        }
+
+        public Builder ephemeralPublicKey(String ephemeralPublicKey) {
+            this.ephemeralPublicKey = ephemeralPublicKey;
+            return this;
+
+        }
+
+        public Builder signature(String signature) {
+            this.signature = signature;
             return this;
         }
     }

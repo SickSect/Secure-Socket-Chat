@@ -50,6 +50,8 @@ public class ChatHandler implements Runnable {
                     case JOIN -> handleJoin(msg);
                     case SEND_MESSAGE -> handleSendMessage(msg);
                     case GET_KEY -> handleGetKey(msg);
+                    case INIT_SESSION -> handleInitSession(msg);
+                    case SESSION_ASK -> handleSessionAsk(msg);
                     case QUIT -> {
                         System.out.println("[ChatHandler] client quit: " + clientName);
                         return;
@@ -110,5 +112,19 @@ public class ChatHandler implements Runnable {
         } catch (Exception e) {
             System.err.println("[ChatHandler] send failed: " + e.getMessage());
         }
+    }
+
+    private void handleInitSession(ClientMessage msg) {
+        boolean forwarded = room.forwardHandshake(msg.toClientName, clientName, msg.ephemeralPublicKey, msg.signature, false);
+        if (!forwarded)
+            send(ServerMessage.error(ErrorCode.RECIPIENT_OFFLINE, "User " + msg.toClientName + " is not connected"));
+        System.out.println("[ChatHandler] forwarded INIT_SESSION from " + clientName + " to " + msg.toClientName);
+    }
+
+    private void handleSessionAsk(ClientMessage msg) {
+        boolean forwarded = room.forwardHandshake(msg.toClientName, clientName, msg.ephemeralPublicKey, msg.signature, true);
+        if (!forwarded)
+            send(ServerMessage.error(ErrorCode.RECIPIENT_OFFLINE, "User " + msg.toClientName + " is not connected"));
+        System.out.println("[ChatHandler] forwarded SESSION_ACK from " + clientName + " to " + msg.toClientName);
     }
 }

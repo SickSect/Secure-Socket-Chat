@@ -31,6 +31,7 @@ public class ChatClientCore {
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, CompletableFuture<PublicKey>> pendingKeyRequests = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, SessionContext> sessions = new ConcurrentHashMap<>();
     private CompletableFuture<Boolean> joinResult;
 
     private PublicKey publicKey;
@@ -110,25 +111,18 @@ public class ChatClientCore {
     }
 
     public void sendMessage(String recipient, String text) throws Exception {
-        PublicKey clientPublicKey = keyCache.get(recipient);
-        if (clientPublicKey == null) {
-            CompletableFuture<PublicKey> future = new CompletableFuture<>();
-            pendingKeyRequests.put(recipient, future);
-            sendRaw(ClientMessage.getKey(recipient));
-            try {
-                clientPublicKey = future.get(10, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                pendingKeyRequests.remove(recipient);
-                listener.onError("KEY_TIMEOUT", "Could not find public key for " + recipient + "!");
-                return;
-            }
+        SessionContext session;
+        try{
+            session = getOrEstablishSession(recipient);
+        }catch (Exception e){
+            listener.onError("SESSION_FAILED", "Could not establish session with " + recipient + ": " + e.getMessage());
+            return;
         }
-
-        String e2ePayload = HybridCrypto.encrypt(text, clientPublicKey);
-        byte[] nonce = new byte[16];
-        new SecureRandom().nextBytes(nonce);
-
-        ClientMessage msg = ClientMessage.message(recipient, Base64.getEncoder().encodeToString(nonce), e2ePayload);
+        String e2ePayload = AesCrypto.encrypt(text, PSK_KEY);
+        byte[] nonceBytes = new byte[16];
+        new SecureRandom().nextBytes(nonceBytes);
+        String nonce = Base64.getEncoder().encodeToString(nonceBytes);
+        ClientMessage msg = ClientMessage.message(recipient, nonce, e2ePayload);
         sendRaw(msg);
     }
 
@@ -152,6 +146,138 @@ public class ChatClientCore {
         thread.start();
     }
 
+    private void instantiateHandshake(String peerName) throws CryptoException, JsonProcessingException {
+        PublicKey peerPublicKey = keyCache.get(peerName);
+        if (peerPublicKey == null) {
+            CompletableFuture<PublicKey> future = new CompletableFuture<>();
+            pendingKeyRequests.put(peerName, future);
+            try {
+                sendRaw(ClientMessage.getKey(peerName));
+                peerPublicKey = future.get(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                pendingKeyRequests.remove(peerName);
+                throw new RuntimeException("Cannot get RSA key for " + peerName);
+            }
+        }
+        KeyPair ephemeralKeyPair;
+        try {
+            ephemeralKeyPair = EcdhCrypto.generateKeyPair();
+        } catch (CryptoException e) {
+            throw new CryptoException("Can not generate ephemeral key pair!", e);
+        }
+        String ephPubBase64 = EcdhCrypto.publicKeyToBase64(ephemeralKeyPair.getPublic());
+        byte[] ephemeralPubBytes = ephemeralKeyPair.getPublic().getEncoded();
+        byte[] signature = RsaSignature.sign(ephemeralPubBytes, ephemeralKeyPair.getPrivate());
+        String signatureBase64 = Base64.getEncoder().encodeToString(signature);
+        SessionContext context = new SessionContext(peerName,ephemeralKeyPair);
+        sessions.put(peerName, context);
+        sendRaw(ClientMessage.initSession(peerName, ephPubBase64, signatureBase64));
+    }
+
+    public void handleInitSession(ServerMessage msg){
+        try{
+            String peerName = msg.fromClientName;
+            PublicKey peerRsaPublicKey = keyCache.get(peerName);
+            if (peerRsaPublicKey == null) {
+                CompletableFuture<PublicKey> future = new CompletableFuture<>();
+                pendingKeyRequests.put(peerName, future);
+                sendRaw(ClientMessage.getKey(peerName));
+                peerRsaPublicKey = future.get(10, TimeUnit.SECONDS);
+            }
+            PublicKey peerEphemeralPub = EcdhCrypto.publicKeyFromBase64(msg.ephemeralPublicKey);
+            byte[] peerEphemeralBytes = peerEphemeralPub.getEncoded();
+            byte[] signature = Base64.getDecoder().decode(msg.signature);
+
+            if (!RsaSignature.verify(peerEphemeralBytes, signature, peerRsaPublicKey)) {
+                listener.onError("BAD_SIGNATURE", "Invalid signature in INIT_SESSION from " + peerName);
+                return;
+            }
+            KeyPair ownEphemeralKeyPair = EcdhCrypto.generateKeyPair();
+            byte[] sharedSecret = EcdhCrypto.computeSharedSecret(ownEphemeralKeyPair.getPrivate(), peerEphemeralPub);
+            byte[] sessionKeyBytes = HkdfCrypto.derive(sharedSecret, null, "secure-chat-session", 32);
+
+            SessionContext context = new SessionContext(peerName,ownEphemeralKeyPair);
+            sessions.put(peerName, context);
+            context.completeHandshake(sessionKeyBytes);
+
+            byte[] myEphemeralPubBytes = ownEphemeralKeyPair.getPublic().getEncoded();
+            byte[] mySignature = RsaSignature.sign(myEphemeralPubBytes, privateKey);
+            String myEphemeralPubBase64 = EcdhCrypto.publicKeyToBase64(ownEphemeralKeyPair.getPublic());
+            String mySignatureBase64 = Base64.getEncoder().encodeToString(mySignature);
+
+            // 8. Отправляем SESSION_ACK
+            sendRaw(ClientMessage.sessionAck(peerName, myEphemeralPubBase64, mySignatureBase64));
+
+            listener.onSystem("Session established with " + peerName);
+        }catch(Exception e){
+            listener.onError("HANDSHAKE_FAILED", "Failed to handle INIT_SESSION: " + e.getMessage());
+        }
+    }
+
+    private void handleSessionAsk(ServerMessage msg)
+    {
+        try {
+            String peerName = msg.fromClientName;
+
+            // 1. Достаём ожидающую сессию
+            SessionContext context = sessions.get(peerName);
+            if (context == null || context.getState() != SessionContext.State.WAITING_FOR_ASK) {
+                listener.onError("UNEXPECTED_ACK", "SESSION_ACK without pending session from " + peerName);
+                return;
+            }
+
+            // 2. Достаём RSA-public собеседника
+            PublicKey peerRsaPublic = keyCache.get(peerName);
+            if (peerRsaPublic == null) {
+                context.failHandshake("No RSA key for verification");
+                return;
+            }
+
+            // 3. Декодируем эфемерный публичный собеседника
+            PublicKey peerEphemeralPub = EcdhCrypto.publicKeyFromBase64(msg.ephemeralPublicKey);
+            byte[] peerEphemeralBytes = peerEphemeralPub.getEncoded();
+            byte[] signatureBytes = Base64.getDecoder().decode(msg.signature);
+
+            // 4. Проверяем подпись
+            if (!RsaSignature.verify(peerEphemeralBytes, signatureBytes, peerRsaPublic)) {
+                context.failHandshake("Invalid signature");
+                listener.onError("BAD_SIGNATURE", "Invalid signature in SESSION_ACK from " + peerName);
+                return;
+            }
+
+            // 5. Вычисляем общий секрет используя НАШ эфемерный private и ИХ эфемерный public
+            byte[] sharedSecret = EcdhCrypto.computeSharedSecret(
+                    context.getEphemeralPrivateKey(), peerEphemeralPub);
+            byte[] sessionKeyBytes = HkdfCrypto.derive(sharedSecret, null, "secure-chat-session", 32);
+
+            // 6. Завершаем handshake — наш эфемерный приватный СТИРАЕТСЯ
+            context.completeHandshake(sessionKeyBytes);
+
+            listener.onSystem("Session established with " + peerName);
+
+        } catch (Exception e) {
+            listener.onError("HANDSHAKE_FAILED", "Failed to handle SESSION_ACK: " + e.getMessage());
+        }
+    }
+
+    private SessionContext getOrEstablishSession(String peerName) throws Exception {
+        SessionContext existing = sessions.get(peerName);
+        if (existing != null && existing.isReady()) {
+            return existing;
+        }
+
+        // Сессии нет или она в процессе — инициируем новую
+        instantiateHandshake(peerName);
+
+        // Ждём завершения handshake
+        SessionContext context = sessions.get(peerName);
+        boolean ok = context.getHandshakeResult().get(10, TimeUnit.SECONDS);
+        if (!ok) {
+            throw new RuntimeException("Handshake failed with " + peerName);
+        }
+        return context;
+    }
+
     /**
      * Acquire decoded server response
      *
@@ -164,6 +290,8 @@ public class ChatClientCore {
             case ERROR -> handleERROR(msg);
             case PUBLIC_KEY -> handlePUBLIC_KEY(msg);
             case SYSTEM -> handleSYSTEM(msg);
+            case INIT_SESSION -> handleInitSession(msg);
+            case SESSION_ASK -> handleSessionAsk(msg);
         }
     }
 
@@ -175,10 +303,15 @@ public class ChatClientCore {
     }
 
     private void handleDM(ServerMessage msg) {
-        try {
-            String plainText = HybridCrypto.decrypt(msg.e2ePayload, privateKey);
+        SessionContext session = sessions.get(msg.fromClientName);
+        if (session == null || !session.isReady()) {
+            listener.onDecryptionFailed(msg.fromClientName);
+            return;
+        }
+        try{
+            String plainText = AesCrypto.decrypt(msg.e2ePayload, session.getSessionKey());
             listener.onMessage(msg.fromClientName, plainText);
-        } catch (CryptoException e) {
+        }catch (Exception e){
             listener.onDecryptionFailed(msg.fromClientName);
         }
     }

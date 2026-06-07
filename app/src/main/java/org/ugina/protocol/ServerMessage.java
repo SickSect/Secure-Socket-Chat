@@ -8,6 +8,8 @@ public class ServerMessage {
     public ErrorCode errorCode;
     public String username;
     public String publicKey;
+    public String ephemeralPublicKey;
+    public String signature;
 
     public ServerMessage() {}
 
@@ -45,6 +47,24 @@ public class ServerMessage {
         m.type = MessageType.PUBLIC_KEY;
         m.username = username;
         m.publicKey = publicKeyBase64;
+        return m;
+    }
+
+    public static ServerMessage initSession(String from, String ephemeralPublicKey, String signature){
+        ServerMessage m = new ServerMessage();
+        m.type = MessageType.INIT_SESSION;
+        m.fromClientName = from;
+        m.ephemeralPublicKey = ephemeralPublicKey;
+        m.signature = signature;
+        return m;
+    }
+
+    public static ServerMessage sessionAsk(String from, String ephemeralPublicKey, String signature){
+        ServerMessage m = new ServerMessage();
+        m.type = MessageType.SESSION_ASK;
+        m.fromClientName = from;
+        m.ephemeralPublicKey = ephemeralPublicKey;
+        m.signature = signature;
         return m;
     }
 }

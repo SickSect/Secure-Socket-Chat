@@ -5,5 +5,7 @@ public enum MessageType {
     DM,
     ERROR,
     SYSTEM,
-    PUBLIC_KEY
+    PUBLIC_KEY,
+    INIT_SESSION,
+    SESSION_ASK
 }

@@ -31,6 +31,16 @@ public class ChatRoom {
         scheduler.scheduleAtFixedRate(this::cleanupNonces, 1, 1, TimeUnit.MINUTES);
     }
 
+    public boolean forwardHandshake(String toName, String fromName, String ephemeralKey, String signature, boolean isAsk){
+        ChatHandler recipient = clientHandlers.get(toName);
+        if (recipient == null) return false;
+        ServerMessage msg = isAsk ?
+                ServerMessage.sessionAsk(fromName, ephemeralKey, signature)
+                : ServerMessage.initSession(fromName, ephemeralKey, signature);
+        recipient.send(msg);
+        return true;
+    }
+
     private void cleanupNonces() {
         long now = System.currentTimeMillis();
         nonces.entrySet().removeIf(e -> e.getValue() < now);
