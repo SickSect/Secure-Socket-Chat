@@ -61,7 +61,7 @@ public class ServerMessage {
 
     public static ServerMessage sessionAsk(String from, String ephemeralPublicKey, String signature){
         ServerMessage m = new ServerMessage();
-        m.type = MessageType.SESSION_ASK;
+        m.type = MessageType.SESSION_ACK;
         m.fromClientName = from;
         m.ephemeralPublicKey = ephemeralPublicKey;
         m.signature = signature;

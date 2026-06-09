@@ -18,6 +18,14 @@ public class RsaSignature {
             signature.update(data);
             return signature.sign();
         } catch (Exception e) {
+            // ВРЕМЕННО для отладки:
+            System.err.println("[RsaSignature.sign] EXCEPTION: "
+                    + e.getClass().getSimpleName() + ": " + e.getMessage());
+            System.err.println("[RsaSignature.sign] privateKey type: "
+                    + (privateKey == null ? "NULL" : privateKey.getAlgorithm()));
+            System.err.println("[RsaSignature.sign] data length: "
+                    + (data == null ? "NULL" : data.length));
+            e.printStackTrace();
             throw new CryptoException("[RsaSignature][sign] failed", e);
         }
     }

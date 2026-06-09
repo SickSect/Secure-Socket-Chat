@@ -118,7 +118,7 @@ public class ChatClientCore {
             listener.onError("SESSION_FAILED", "Could not establish session with " + recipient + ": " + e.getMessage());
             return;
         }
-        String e2ePayload = AesCrypto.encrypt(text, PSK_KEY);
+        String e2ePayload = AesCrypto.encrypt(text, session.getSessionKey());
         byte[] nonceBytes = new byte[16];
         new SecureRandom().nextBytes(nonceBytes);
         String nonce = Base64.getEncoder().encodeToString(nonceBytes);
@@ -167,7 +167,7 @@ public class ChatClientCore {
         }
         String ephPubBase64 = EcdhCrypto.publicKeyToBase64(ephemeralKeyPair.getPublic());
         byte[] ephemeralPubBytes = ephemeralKeyPair.getPublic().getEncoded();
-        byte[] signature = RsaSignature.sign(ephemeralPubBytes, ephemeralKeyPair.getPrivate());
+        byte[] signature = RsaSignature.sign(ephemeralPubBytes, this.privateKey);
         String signatureBase64 = Base64.getEncoder().encodeToString(signature);
         SessionContext context = new SessionContext(peerName,ephemeralKeyPair);
         sessions.put(peerName, context);
@@ -175,6 +175,10 @@ public class ChatClientCore {
     }
 
     public void handleInitSession(ServerMessage msg){
+        new Thread(() -> handleInitSessionAsync(msg), "handshake-handler").start();
+    }
+
+    private void handleInitSessionAsync(ServerMessage msg) {
         try{
             String peerName = msg.fromClientName;
             PublicKey peerRsaPublicKey = keyCache.get(peerName);
@@ -214,14 +218,14 @@ public class ChatClientCore {
         }
     }
 
-    private void handleSessionAsk(ServerMessage msg)
+    private void handleSessionAck(ServerMessage msg)
     {
         try {
             String peerName = msg.fromClientName;
 
             // 1. Достаём ожидающую сессию
             SessionContext context = sessions.get(peerName);
-            if (context == null || context.getState() != SessionContext.State.WAITING_FOR_ASK) {
+            if (context == null || context.getState() != SessionContext.State.WAITING_FOR_ACK) {
                 listener.onError("UNEXPECTED_ACK", "SESSION_ACK without pending session from " + peerName);
                 return;
             }
@@ -291,12 +295,12 @@ public class ChatClientCore {
             case PUBLIC_KEY -> handlePUBLIC_KEY(msg);
             case SYSTEM -> handleSYSTEM(msg);
             case INIT_SESSION -> handleInitSession(msg);
-            case SESSION_ASK -> handleSessionAsk(msg);
+            case SESSION_ACK -> handleSessionAck(msg);
         }
     }
 
     private void handleSYSTEM(ServerMessage msg) {
-        if (!joinResult.isDone() && joinResult != null) {
+        if (joinResult != null && !joinResult.isDone()) {
             joinResult.complete(true);
         }
         listener.onSystem(msg.text);
@@ -325,7 +329,7 @@ public class ChatClientCore {
     }
 
     private void handleERROR(ServerMessage msg) {
-        if (!joinResult.isDone() && joinResult != null){
+        if (joinResult != null && !joinResult.isDone()){
             joinResult.complete(false);
         }
         try {

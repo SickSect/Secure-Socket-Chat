@@ -55,7 +55,7 @@ public class ClientMessage {
 
     public static ClientMessage sessionAck(String toName, String ephemeralPubBase64, String signatureBase64) {
         return new Builder()
-                .commandType(CommandType.SESSION_ASK)
+                .commandType(CommandType.SESSION_ACK)
                 .toClientName(toName)
                 .ephemeralPublicKey(ephemeralPubBase64)
                 .signature(signatureBase64)

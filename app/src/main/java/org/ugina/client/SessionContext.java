@@ -10,7 +10,7 @@ public class SessionContext {
 
 
     public enum State {
-        WAITING_FOR_ASK,
+        WAITING_FOR_ACK,
         READY,
         FAILED
     }
@@ -23,7 +23,7 @@ public class SessionContext {
     public SessionContext(String peerName, KeyPair ephemeralKeyPair) {
         this.peerName = peerName;
         this.ephemeralKeyPair = ephemeralKeyPair;
-        this.state = State.WAITING_FOR_ASK;          // ← устанавливается внутри
+        this.state = State.WAITING_FOR_ACK;          // ← устанавливается внутри
         this.sessionKey = null;                       // ← (default, можно не писать)
         this.handshakeResult = new CompletableFuture<>();  // ← создаётся внутри
     }

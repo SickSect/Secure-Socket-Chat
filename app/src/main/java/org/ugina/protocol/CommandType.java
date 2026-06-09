@@ -6,5 +6,5 @@ public enum CommandType {
     JOIN,
     GET_KEY,
     INIT_SESSION,
-    SESSION_ASK
+    SESSION_ACK
 }
