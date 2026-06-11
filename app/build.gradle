@@ -6,13 +6,24 @@
  */
 
 plugins {
-    // Apply the application plugin to add support for building a CLI application in Java.
+    id 'java'
     id 'application'
+    id 'org.springframework.boot' version '3.5.14'
+    id 'io.spring.dependency-management' version '1.1.7'
 }
 
 repositories {
     // Use Maven Central for resolving dependencies.
     mavenCentral()
+}
+
+ext {
+    springBootVersion = '3.5.14'
+    jacksonVersion = '2.21.3'
+    postgresVersion = '42.7.11'
+    flywayVersion = '12.6.1'
+    jjwtVersion = '0.12.6'
+    springSecurityTestVersion = '7.0.4'
 }
 
 dependencies {
@@ -21,7 +32,26 @@ dependencies {
 
     // This dependency is used by the application.
     implementation libs.guava
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+    implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+
+    implementation "org.springframework.boot:spring-boot-starter-web:${springBootVersion}"
+    implementation "org.springframework.boot:spring-boot-starter-validation:${springBootVersion}"
+
+    implementation "org.springframework.boot:spring-boot-starter-data-jpa:${springBootVersion}"
+    runtimeOnly "org.postgresql:postgresql:${postgresVersion}"
+    implementation "org.flywaydb:flyway-core:${flywayVersion}"
+    implementation "org.flywaydb:flyway-database-postgresql:${flywayVersion}"
+
+    implementation "org.springframework.boot:spring-boot-starter-security:${springBootVersion}"
+    implementation "io.jsonwebtoken:jjwt-api:${jjwtVersion}"
+    runtimeOnly "io.jsonwebtoken:jjwt-impl:${jjwtVersion}"
+    runtimeOnly "io.jsonwebtoken:jjwt-jackson:${jjwtVersion}"
+
+// BCrypt для паролей — приходит с spring-security, явная не нужна
+
+// Тесты Spring Boot
+    testImplementation "org.springframework.boot:spring-boot-starter-test:${springBootVersion}"
+    testImplementation "org.springframework.security:spring-security-test:${springSecurityTestVersion}"
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
@@ -32,7 +62,6 @@ java {
 }
 
 application {
-    // Define the main class for the application.
     mainClass = 'org.ugina.App'
 }
 
