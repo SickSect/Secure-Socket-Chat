@@ -1,10 +1,5 @@
 package org.ugina.client;
 
-import org.ugina.crypto.keyStorage.FileBasedKeyStorage;
-import org.ugina.crypto.keyStorage.KeyStorage;
-
-import java.nio.file.Path;
-
 public class ChatClient {
 
     private static final String HOST = "localhost";

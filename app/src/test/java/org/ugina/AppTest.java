@@ -3,13 +3,37 @@
  */
 package org.ugina;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.testng.annotations.*;
+import org.ugina.config.ChatProperties;
+import org.ugina.config.ChatServerStarter;
+
 import static org.testng.Assert.*;
 
-public class AppTest {
+@SpringBootTest
+public class AppTest extends org.springframework.test.context.testng.AbstractTestNGSpringContextTests {
+    @Autowired
+    private ChatProperties chatProperties;
+
+    @Autowired(required = false)
+    private ChatServerStarter chatServerStarter;
+
     @Test
-    public void appHasAGreeting() {
-        App classUnderTest = new App();
-        assertNotNull(classUnderTest.getGreeting(), "app should have a greeting");
+    public void contextLoads() {
+        // Если этот метод выполнился — контекст поднялся успешно
+        assertNotNull(chatProperties, "ChatProperties bean должен быть создан");
+    }
+
+    @Test
+    public void chatPropertiesAreLoaded() {
+        assertEquals(chatProperties.getTcpPort(), 5000,
+                "TCP port должен прочитаться из тестового application.yml");
+    }
+
+    @Test
+    public void chatServerStarterIsDisabledInTests() {
+        assertNull(chatServerStarter,
+                "ChatServerStarter не должен создаваться в тестах (chat.tcp-enabled=false)");
     }
 }
