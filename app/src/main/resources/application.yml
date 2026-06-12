@@ -1,0 +1,16 @@
+server:
+  port: 8080  # порт встроенного Tomcat для будущих REST endpoints
+
+chat:
+  tcp-port: 5000  # порт нашего TCP-чата
+  tcp-enabled: false # ChatServerStarter не создаётся в тестах
+
+spring:
+  # Пока без БД и Security — отключим автоконфиги, иначе Spring упадёт при старте
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration

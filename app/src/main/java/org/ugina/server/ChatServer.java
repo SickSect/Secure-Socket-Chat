@@ -1,6 +1,9 @@
 package org.ugina.server;
 
+import lombok.extern.slf4j.Slf4j;
+import org.apache.juli.logging.Log;
 import org.ugina.crypto.KeyLoader;
+import org.ugina.utils.CustomLogger;
 
 import javax.crypto.SecretKey;
 import java.io.IOException;
@@ -10,9 +13,10 @@ import java.security.GeneralSecurityException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+@Slf4j
 public class ChatServer {
-    private static final int PORT = 5000;
     private static final SecretKey key;
+    private final int port;
 
     static {
         try {
@@ -22,20 +26,24 @@ public class ChatServer {
         }
     }
 
-    public static void main(String[] args) throws IOException, GeneralSecurityException {
-        System.out.println("[server] starting on port " + PORT);
+    public ChatServer(int port){
+        this.port = port;
+    }
 
-        ExecutorService executorService = Executors.newCachedThreadPool();
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            System.out.println("[server] waiting for client...");
+    public void start(){
+        CustomLogger.logInfo("Start chat server...", ChatServer.class.getName());
+        ExecutorService executor = Executors.newCachedThreadPool();
+        try(ServerSocket serverSocket = new ServerSocket(this.port)){
+            CustomLogger.logInfo("Waiting for client...", ChatServer.class.getName());
             ChatRoom room = new ChatRoom();
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                System.out.println("[server] client connected: " + clientSocket.getRemoteSocketAddress());
-
-                ChatHandler chatHandler = new ChatHandler(clientSocket, room, key);
-                executorService.execute(chatHandler);
+            while(true){
+                Socket socket = serverSocket.accept();
+                CustomLogger.logInfo("Client connected! %s".formatted(socket.getRemoteSocketAddress()), ChatServer.class.getName());
+                ChatHandler handler = new ChatHandler(socket, room,key);
+                executor.execute(handler);
             }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }

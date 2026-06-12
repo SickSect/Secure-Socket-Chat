@@ -26,6 +26,10 @@ ext {
     springSecurityTestVersion = '7.0.4'
 }
 
+application {
+    mainClass = 'org.ugina.App'
+}
+
 dependencies {
     // Use TestNG framework, also requires calling test.useTestNG() below
     testImplementation libs.testng
@@ -46,6 +50,9 @@ dependencies {
     implementation "io.jsonwebtoken:jjwt-api:${jjwtVersion}"
     runtimeOnly "io.jsonwebtoken:jjwt-impl:${jjwtVersion}"
     runtimeOnly "io.jsonwebtoken:jjwt-jackson:${jjwtVersion}"
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
 
 // BCrypt для паролей — приходит с spring-security, явная не нужна
 
