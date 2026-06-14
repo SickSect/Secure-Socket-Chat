@@ -7,6 +7,9 @@ chat:
 
 auth:
   provider: local
+  jwt:
+    secret: ${JWT_SECRET:change-me-in-production-this-must-be-at-least-256-bits-long}
+    expiration-minutes: 60
 
 spring:
   # Пока без БД и Security — отключим автоконфиги, иначе Spring упадёт при старте
