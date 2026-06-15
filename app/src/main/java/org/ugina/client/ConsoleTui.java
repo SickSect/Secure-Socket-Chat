@@ -1,19 +1,24 @@
 package org.ugina.client;
 
+import org.ugina.crypto.RsaCrypto;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.security.KeyPair;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
-/**
- * Консольный TUI. Реализует ChatEventListener для отображения событий
- * и читает ввод пользователя из stdin.
- */
 public class ConsoleTui implements ChatEventListener {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
 
     private ChatClientCore core;
+    private final AuthClient authClient;
+    private final KeyManager keyManager = new KeyManager();
+
+    public ConsoleTui(String serverBaseUrl) {
+        this.authClient = new AuthClient(serverBaseUrl);
+    }
 
     public void setCore(ChatClientCore core) {
         this.core = core;
@@ -23,44 +28,107 @@ public class ConsoleTui implements ChatEventListener {
         printWelcome();
 
         try (BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in))) {
-            System.out.print("Your name: ");
-            String name = stdin.readLine();
-            if (name == null || name.isBlank()) {
-                System.out.println("Empty name, exiting");
+
+            System.out.print("Choose: (1) register  (2) login: ");
+            String choice = stdin.readLine();
+
+            if ("1".equals(choice)) {
+                handleRegister(stdin);
+                // после регистрации просим залогиниться
+                System.out.println("Now login with your credentials.");
+            }
+
+            // в обоих случаях дальше — логин
+            String jwt = handleLogin(stdin);
+            if (jwt == null) {
+                return;  // логин не удался, сообщение уже выведено
+            }
+
+            // подключаемся к чату
+            String loginName = lastLoginUsername;
+            KeyPair keyPair = keyManager.load(loginName, lastLoginPassword);
+            boolean joined = core.connect(jwt, keyPair);
+            if (!joined) {
+                System.out.println("Could not join chat — token rejected or server unreachable");
                 return;
             }
 
-            System.out.print("Password (for protecting your identity key): ");
-            String passwordLine = stdin.readLine();
-            if (passwordLine == null || passwordLine.isBlank()) {
-                System.out.println("Empty password, exiting");
-                return;
-            }
-            char[] password = passwordLine.toCharArray();
+            runChatLoop(stdin);
 
-            boolean joined = core.connect(name, password);
-            if (!joined){
-                System.out.println("Could not connect — name may be taken or server unreachable");
-                return;
-            }
-
-            String input;
-            while ((input = stdin.readLine()) != null) {
-                if (input.isBlank()) continue;
-                try {
-                    if (!handleInput(input)) break;
-                } catch (Exception e) {
-                    System.err.println("[client] error: " + e.getMessage());
-                }
-            }
         } finally {
             core.disconnect();
         }
     }
 
-    /**
-     * @return false если пользователь захотел выйти
-     */
+    // временные поля чтобы пробросить креды от login к connect
+    private String lastLoginUsername;
+    private char[] lastLoginPassword;
+
+    private void handleRegister(BufferedReader stdin) throws Exception {
+        System.out.print("Choose username: ");
+        String username = stdin.readLine();
+        System.out.print("Choose password: ");
+        String password = stdin.readLine();
+
+        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+            System.out.println("Username and password required");
+            return;
+        }
+
+        try {
+            // создаём и сохраняем ключи локально
+            KeyPair keyPair = keyManager.createAndStore(username, password.toCharArray());
+            String publicKeyBase64 = RsaCrypto.publicKeyToBase64(keyPair.getPublic());
+
+            // регистрируем на сервере
+            String error = authClient.register(username, password, publicKeyBase64);
+            if (error == null) {
+                System.out.println("Registered successfully!");
+            } else {
+                System.out.println("Registration failed: " + error);
+            }
+        } catch (IllegalStateException e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    private String handleLogin(BufferedReader stdin) throws Exception {
+        System.out.print("Username: ");
+        String username = stdin.readLine();
+        System.out.print("Password: ");
+        String password = stdin.readLine();
+
+        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+            System.out.println("Username and password required");
+            return null;
+        }
+
+        String jwt = authClient.login(username, password);
+        if (jwt == null) {
+            System.out.println("Login failed — invalid credentials");
+            return null;
+        }
+
+        // сохраняем для последующей загрузки ключей
+        lastLoginUsername = username;
+        lastLoginPassword = password.toCharArray();
+
+        System.out.println("Logged in successfully!");
+        return jwt;
+    }
+
+    private void runChatLoop(BufferedReader stdin) throws Exception {
+        String input;
+        while ((input = stdin.readLine()) != null) {
+            if (input.isBlank()) continue;
+            try {
+                if (!handleInput(input)) break;
+            } catch (Exception e) {
+                System.err.println("[client] error: " + e.getMessage());
+            }
+        }
+    }
+
     private boolean handleInput(String input) throws Exception {
         if (input.equals("/quit")) return false;
 
@@ -89,7 +157,7 @@ public class ConsoleTui implements ChatEventListener {
     private void printWelcome() {
         System.out.println();
         System.out.println("─────────────────────────────────────────");
-        System.out.println("  Secure Chat v0.3");
+        System.out.println("  Secure Chat v0.5");
         System.out.println("─────────────────────────────────────────");
         System.out.println("  @<user> <text>   send a message");
         System.out.println("  /help            show this help");
@@ -102,7 +170,7 @@ public class ConsoleTui implements ChatEventListener {
         return LocalTime.now().format(TIME);
     }
 
-    // ─── ChatEventListener ───────────────────────────────────
+    // ─── ChatEventListener ───
 
     @Override
     public void onMessage(String from, String text) {

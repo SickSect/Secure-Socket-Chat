@@ -2,9 +2,12 @@ package org.ugina.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ugina.auth.AuthProvider;
+import org.ugina.auth.UserPrincipal;
+import org.ugina.auth.exceptions.InvalidTokenException;
 import org.ugina.crypto.AesCrypto;
 import org.ugina.crypto.RsaCrypto;
 import org.ugina.protocol.*;
+import org.ugina.utils.CustomLogger;
 
 import javax.crypto.SecretKey;
 import java.io.BufferedReader;
@@ -62,28 +65,38 @@ public class ChatHandler implements Runnable {
                 }
             }
         } catch (Exception e) {
-            System.out.println("[ChatHandler] client disconnected: " + clientSocket.getRemoteSocketAddress());
+            CustomLogger.logInfo("client disconnected:" + clientSocket.getRemoteSocketAddress(), ChatHandler.class.getName());
+            //System.out.println("[ChatHandler] client disconnected: " + clientSocket.getRemoteSocketAddress());
         } finally {
             room.leaveClient(clientName);
         }
     }
 
     private void handleJoin(ClientMessage msg) {
+        UserPrincipal principal;
+        try{
+            principal = authProvider.validate(msg.jwt);
+        }catch (InvalidTokenException ex){
+            CustomLogger.logInfo("Invalid or expired token", ChatHandler.class.getName());
+            send(ServerMessage.error(ErrorCode.INVALID_TOKEN, "Invalid or expired token"));
+            return;
+        }
         PublicKey pk;
         try {
-            pk = RsaCrypto.publicKeyFromBase64(msg.publicKey);
+            pk = RsaCrypto.publicKeyFromBase64(principal.publicKey());
         } catch (Exception e) {
+            CustomLogger.logInfo("Invalid public key", ChatHandler.class.getName());
             send(ServerMessage.error(ErrorCode.INVALID_PUBLIC_KEY, "Invalid public key"));
             return;
         }
-        boolean joined = room.joinClient(msg.username, this, pk);
+        boolean joined = room.joinClient(principal.username(), this, pk);
         if (!joined) {
-            send(ServerMessage.error(ErrorCode.NAME_TAKEN, msg.username + " is already in use"));
+            send(ServerMessage.error(ErrorCode.NAME_TAKEN, principal.username() + " is already in use"));
             return;
         }
-        clientName = msg.username;
-        send(ServerMessage.system("Welcome, " + msg.username));
-        System.out.println("[ChatHandler] joined: " + msg.username);
+        clientName = principal.username();
+        send(ServerMessage.system("Welcome, " + principal.username() + "!"));
+        CustomLogger.logInfo("joined: " + principal.username(), ChatHandler.class.getName());
     }
 
     private void handleSendMessage(ClientMessage msg) throws IOException {

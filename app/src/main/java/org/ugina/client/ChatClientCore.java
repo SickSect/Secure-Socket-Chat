@@ -54,20 +54,15 @@ public class ChatClientCore {
     }
 
     /**
-     * Acquire username and create socket connection with server
+     * Подключается к серверу с готовым JWT и ключевой парой.
      *
-     * @param username - client username
+     * @param jwt     токен полученный через REST-логин
+     * @param keyPair RSA-пара пользователя (приватный нужен для handshake)
+     * @return true если JOIN успешен
      */
-    public boolean connect(String username, char[] password) throws Exception {
-        Path keyFile = Path.of(
-                System.getProperty("user.home"),
-                ".secure-chat",
-                username + ".key"
-        );
-        keyStorage = new FileBasedKeyStorage(keyFile);
-        KeyPair keyPair = loadOrCreateKeys(password);
-        publicKey = keyPair.getPublic();
-        privateKey = keyPair.getPrivate();
+    public boolean connect(String jwt, KeyPair keyPair) throws Exception {
+        this.publicKey = keyPair.getPublic();
+        this.privateKey = keyPair.getPrivate();
 
         try {
             socketCache = new Socket(HOST, PORT);
@@ -81,7 +76,7 @@ public class ChatClientCore {
         }
         joinResult = new CompletableFuture<>();
         startReaderThread();
-        sendRaw(ClientMessage.join(username, publicKey));
+        sendRaw(ClientMessage.join(jwt));
         try {
             return joinResult.get(10, TimeUnit.SECONDS);
         } catch (Exception e) {

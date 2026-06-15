@@ -14,15 +14,15 @@ public class ClientMessage {
     public String nonce;             // для SEND_MESSAGE (Base64)
     public String ephemeralPublicKey;
     public String signature;
+    public String jwt;
 
     public ClientMessage() {
     }
 
-    public static ClientMessage join(String clientName, PublicKey publicKey) {
+    public static ClientMessage join(String jwt) {
         return new Builder()
                 .commandType(CommandType.JOIN)
-                .username(clientName)
-                .publicKey(RsaCrypto.publicKeyToBase64(publicKey))
+                .jwt(jwt)
                 .build();
     }
 
@@ -72,6 +72,7 @@ public class ClientMessage {
         this.nonce = builder.nonce;
         this.signature = builder.signature;
         this.ephemeralPublicKey = builder.ephemeralPublicKey;
+        this.jwt = builder.jwt;
     }
 
 
@@ -85,6 +86,7 @@ public class ClientMessage {
         public String nonce;             // для SEND_MESSAGE (Base64)
         public String ephemeralPublicKey;
         public String signature;
+        public String jwt;
 
 
         public ClientMessage build() {
@@ -129,11 +131,15 @@ public class ClientMessage {
         public Builder ephemeralPublicKey(String ephemeralPublicKey) {
             this.ephemeralPublicKey = ephemeralPublicKey;
             return this;
-
         }
 
         public Builder signature(String signature) {
             this.signature = signature;
+            return this;
+        }
+
+        public Builder jwt(String jwt){
+            this.jwt = jwt;
             return this;
         }
     }

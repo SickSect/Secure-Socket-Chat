@@ -46,7 +46,7 @@ public class LocalAuthProvider implements AuthProvider {
         user.setPasswordHash(passwordHash);
         user.setPublicKey(publicKey);
         User savedUser = userRepository.save(user);
-        return new UserPrincipal(savedUser.getUsername(), savedUser.getPasswordHash());
+        return new UserPrincipal(savedUser.getUsername(), savedUser.getPublicKey());
     }
 
     @Override
@@ -54,12 +54,12 @@ public class LocalAuthProvider implements AuthProvider {
             throws AuthenticationException {
         Optional<User> userOpt = userRepository.findByUsername(username);
         if (userOpt.isEmpty()) {
-            CustomLogger.logInfo("Invalid username or password", LocalAuthProvider.class.getName());
+            CustomLogger.logInfo("DEBUG: user NOT FOUND: '" + username + "'", LocalAuthProvider.class.getName());
             throw new AuthenticationException("Invalid username or password");
         }
         User user = userOpt.get();
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
-            CustomLogger.logInfo("Invalid username or password", LocalAuthProvider.class.getName());
+            CustomLogger.logInfo("DEBUG: password MISMATCH for: '" + username + "'", LocalAuthProvider.class.getName());
             throw new AuthenticationException("Invalid username or password");
         }
         // Generate token
