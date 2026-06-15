@@ -2,6 +2,7 @@ package org.ugina.server;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.juli.logging.Log;
+import org.ugina.auth.AuthProvider;
 import org.ugina.crypto.KeyLoader;
 import org.ugina.utils.CustomLogger;
 
@@ -17,6 +18,7 @@ import java.util.concurrent.Executors;
 public class ChatServer {
     private static final SecretKey key;
     private final int port;
+    private final AuthProvider authProvider;
 
     static {
         try {
@@ -26,8 +28,9 @@ public class ChatServer {
         }
     }
 
-    public ChatServer(int port){
+    public ChatServer(int port, AuthProvider authProvider) {
         this.port = port;
+        this.authProvider = authProvider;
     }
 
     public void start(){
@@ -39,7 +42,7 @@ public class ChatServer {
             while(true){
                 Socket socket = serverSocket.accept();
                 CustomLogger.logInfo("Client connected! %s".formatted(socket.getRemoteSocketAddress()), ChatServer.class.getName());
-                ChatHandler handler = new ChatHandler(socket, room,key);
+                ChatHandler handler = new ChatHandler(socket, room, key, authProvider);
                 executor.execute(handler);
             }
         } catch (Exception e) {

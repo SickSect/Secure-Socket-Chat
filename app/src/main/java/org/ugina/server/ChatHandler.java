@@ -1,6 +1,7 @@
 package org.ugina.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.ugina.auth.AuthProvider;
 import org.ugina.crypto.AesCrypto;
 import org.ugina.crypto.RsaCrypto;
 import org.ugina.protocol.*;
@@ -19,14 +20,16 @@ public class ChatHandler implements Runnable {
     private final ChatRoom room;
     private final SecretKey pskKey;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final AuthProvider authProvider;
     private PrintWriter out;
     private BufferedReader in;
     private String clientName = null;
 
-    public ChatHandler(Socket clientSocket, ChatRoom room, SecretKey pskKey) {
+    public ChatHandler(Socket clientSocket, ChatRoom room, SecretKey pskKey, AuthProvider authProvider) {
         this.clientSocket = clientSocket;
         this.room = room;
         this.pskKey = pskKey;
+        this.authProvider = authProvider;
     }
 
     @Override
