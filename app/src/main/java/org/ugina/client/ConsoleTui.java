@@ -52,7 +52,6 @@ public class ConsoleTui implements ChatEventListener {
                 System.out.println("Could not join chat — token rejected or server unreachable");
                 return;
             }
-
             runChatLoop(stdin);
 
         } finally {

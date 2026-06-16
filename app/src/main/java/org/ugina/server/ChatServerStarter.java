@@ -1,10 +1,10 @@
-package org.ugina.config;
+package org.ugina.server;
 
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.ugina.auth.AuthProvider;
-import org.ugina.server.ChatServer;
+import org.ugina.config.ChatProperties;
 import org.ugina.utils.CustomLogger;
 
 @Component

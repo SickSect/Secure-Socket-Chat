@@ -4,6 +4,8 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.security.KeyPair;
 import java.security.PrivateKey;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 
 public class SessionContext {
@@ -20,12 +22,20 @@ public class SessionContext {
     private final CompletableFuture<Boolean> handshakeResult;
     private final String peerName;
 
+    private static final Duration IDLE_TIMEOUT = Duration.ofMinutes(30);
+    private static final Duration ABSOLUTE_TIMEOUT = Duration.ofHours(24);
+
+    private final Instant createdAt;       // когда создана
+    private volatile Instant lastActivityAt; // последнее использование
+
     public SessionContext(String peerName, KeyPair ephemeralKeyPair) {
         this.peerName = peerName;
         this.ephemeralKeyPair = ephemeralKeyPair;
-        this.state = State.WAITING_FOR_ACK;          // ← устанавливается внутри
-        this.sessionKey = null;                       // ← (default, можно не писать)
-        this.handshakeResult = new CompletableFuture<>();  // ← создаётся внутри
+        this.state = State.WAITING_FOR_ACK;
+        this.sessionKey = null;
+        this.handshakeResult = new CompletableFuture<>();
+        this.createdAt = Instant.now();
+        this.lastActivityAt = Instant.now();
     }
 
 
@@ -33,7 +43,19 @@ public class SessionContext {
         this.sessionKey = new SecretKeySpec(sessionKeyBytes, "AES");
         this.ephemeralKeyPair = null;
         this.state = State.READY;
+        this.lastActivityAt = Instant.now();
         this.handshakeResult.complete(true);
+    }
+
+    public void touch(){
+        this.lastActivityAt = Instant.now();
+    }
+
+    public boolean isExpired(){
+        Instant now = Instant.now();
+        boolean idleExpired = Duration.between(lastActivityAt, now).compareTo(IDLE_TIMEOUT) > 0;
+        boolean absoluteExpired = Duration.between(lastActivityAt, now).compareTo(ABSOLUTE_TIMEOUT) > 0;
+        return idleExpired || absoluteExpired;
     }
 
     public void failHandshake(String reason){
@@ -68,5 +90,13 @@ public class SessionContext {
 
     public CompletableFuture<Boolean> getHandshakeResult() {
         return handshakeResult;
+    }
+
+    public Instant getLastActivityAt() {
+        return lastActivityAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 }

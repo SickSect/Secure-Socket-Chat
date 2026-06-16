@@ -261,14 +261,17 @@ public class ChatClientCore {
 
     private SessionContext getOrEstablishSession(String peerName) throws Exception {
         SessionContext existing = sessions.get(peerName);
-        if (existing != null && existing.isReady()) {
-            return existing;
+        if (existing != null && existing.isReady() && !existing.isExpired()) {
+            return existing;   // готова И не истекла → переиспользуем
         }
 
-        // Сессии нет или она в процессе — инициируем новую
-        instantiateHandshake(peerName);
+        // Сессия истекла — убираем старую перед новым handshake
+        if (existing != null && existing.isExpired()) {
+            sessions.remove(peerName);
+            listener.onSystem("Session with " + peerName + " expired, re-establishing...");
+        }
 
-        // Ждём завершения handshake
+        instantiateHandshake(peerName);
         SessionContext context = sessions.get(peerName);
         boolean ok = context.getHandshakeResult().get(10, TimeUnit.SECONDS);
         if (!ok) {
@@ -309,6 +312,7 @@ public class ChatClientCore {
         }
         try{
             String plainText = AesCrypto.decrypt(msg.e2ePayload, session.getSessionKey());
+            session.touch();
             listener.onMessage(msg.fromClientName, plainText);
         }catch (Exception e){
             listener.onDecryptionFailed(msg.fromClientName);

@@ -35,8 +35,9 @@ public class ChatServer {
 
     public void start(){
         CustomLogger.logInfo("Start chat server...", ChatServer.class.getName());
-        ExecutorService executor = Executors.newCachedThreadPool();
+        ExecutorService executor = null;
         try(ServerSocket serverSocket = new ServerSocket(this.port)){
+            executor = Executors.newCachedThreadPool();
             CustomLogger.logInfo("Waiting for client...", ChatServer.class.getName());
             ChatRoom room = new ChatRoom();
             while(true){
@@ -47,6 +48,9 @@ public class ChatServer {
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
+        } finally {
+            if (executor != null)
+                executor.shutdown();
         }
     }
 }

@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.testng.annotations.*;
 import org.ugina.config.ChatProperties;
-import org.ugina.config.ChatServerStarter;
+import org.ugina.server.ChatServerStarter;
 
 import static org.testng.Assert.*;
 
