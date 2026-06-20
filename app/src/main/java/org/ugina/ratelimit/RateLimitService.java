@@ -32,4 +32,12 @@ public class RateLimitService {
                 .build();
         return Bucket.builder().addLimit(bandwidth).build();
     }
+
+    public RateLimitProperties.Limit registerLimit() {
+        return properties.getRegister();
+    }
+
+    public RateLimitProperties.Limit loginLimit() {
+        return properties.getLogin();
+    }
 }
