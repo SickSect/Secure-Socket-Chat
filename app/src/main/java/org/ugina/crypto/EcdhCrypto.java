@@ -30,7 +30,7 @@ public class EcdhCrypto {
             KeyAgreement keyAgreement = KeyAgreement.getInstance(KEY_AGREEMENT_ALGORITHM);
             keyAgreement.init(ownPrivateKey);
             keyAgreement.doPhase(peerPublicKey, true);
-            // THIS IS RAW ECDH SECRET? NOT A FINAL KEY!
+            // THIS IS RAW ECDH SECRET! NOT A FINAL KEY!
             return keyAgreement.generateSecret();
         } catch (Exception e) {
             throw new CryptoException("[EcdhCrypto][computeSharedSecret] failed", e);

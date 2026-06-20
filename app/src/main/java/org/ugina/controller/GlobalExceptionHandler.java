@@ -5,9 +5,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.ugina.crypto.exception.AuthenticationException;
-import org.ugina.crypto.exception.RegistrationException;
-
+import org.ugina.auth.exceptions.AuthenticationException;
+import org.ugina.auth.exceptions.RegistrationException;
 
 import java.util.HashMap;
 import java.util.Map;

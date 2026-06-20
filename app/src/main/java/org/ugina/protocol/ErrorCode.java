@@ -9,5 +9,6 @@ public enum ErrorCode {
     REPLAY,               // ← новое
     DECRYPTION_FAILED,
     INVALID_FORMAT,
-    INTERNAL_ERROR
+    INTERNAL_ERROR,
+    INVALID_TOKEN
 }

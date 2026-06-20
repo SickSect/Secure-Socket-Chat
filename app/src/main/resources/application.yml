@@ -3,7 +3,13 @@ server:
 
 chat:
   tcp-port: 5000  # порт нашего TCP-чата
-  tcp-enabled: false # ChatServerStarter не создаётся в тестах
+  tcp-enabled: true # ChatServerStarter не создаётся в тестах
+
+auth:
+  provider: local
+  jwt:
+    secret: ${JWT_SECRET:change-me-in-production-this-must-be-at-least-256-bits-long}
+    expiration-minutes: 60
 
 rate-limit:
   register:
@@ -17,8 +23,25 @@ spring:
   # Пока без БД и Security — отключим автоконфиги, иначе Spring упадёт при старте
   autoconfigure:
     exclude:
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
-      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+      #- org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      #- org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      #- org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
       - org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
       - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  datasource:
+    url: jdbc:postgresql://localhost:5432/secure_chat
+    username: postgres
+    password: 21062007
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true

@@ -56,23 +56,19 @@ public class ChatClientCore {
     }
 
     /**
-     * Acquire username and create socket connection with server
+     * Подключается к серверу с готовым JWT и ключевой парой.
      *
-     * @param username - client username
+     * @param jwt     токен полученный через REST-логин
+     * @param keyPair RSA-пара пользователя (приватный нужен для handshake)
+     * @return true если JOIN успешен
      */
-    public boolean connect(String username, char[] password) throws Exception {
-        Path keyFile = Path.of(
-                System.getProperty("user.home"),
-                ".secure-chat",
-                username + ".key"
-        );
-        keyStorage = new FileBasedKeyStorage(keyFile);
-        KeyPair keyPair = loadOrCreateKeys(password);
-        publicKey = keyPair.getPublic();
-        privateKey = keyPair.getPrivate();
+    public boolean connect(String jwt, KeyPair keyPair) throws Exception {
+        this.publicKey = keyPair.getPublic();
+        this.privateKey = keyPair.getPrivate();
 
         try {
             socketCache = new Socket(HOST, PORT);
+            socketCache.setKeepAlive(true);
             in = new BufferedReader(new InputStreamReader(socketCache.getInputStream()));
             out = new PrintWriter(socketCache.getOutputStream(), true);
             stdin = new BufferedReader(new InputStreamReader(System.in));
@@ -84,7 +80,7 @@ public class ChatClientCore {
         joinResult = new CompletableFuture<>();
         connected = true;
         startReaderThread();
-        sendRaw(ClientMessage.join(username, publicKey));
+        sendRaw(ClientMessage.join(jwt));
         try {
             return joinResult.get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -276,14 +272,17 @@ public class ChatClientCore {
 
     private SessionContext getOrEstablishSession(String peerName) throws Exception {
         SessionContext existing = sessions.get(peerName);
-        if (existing != null && existing.isReady()) {
-            return existing;
+        if (existing != null && existing.isReady() && !existing.isExpired()) {
+            return existing;   // готова И не истекла → переиспользуем
         }
 
-        // Сессии нет или она в процессе — инициируем новую
-        instantiateHandshake(peerName);
+        // Сессия истекла — убираем старую перед новым handshake
+        if (existing != null && existing.isExpired()) {
+            sessions.remove(peerName);
+            listener.onSystem("Session with " + peerName + " expired, re-establishing...");
+        }
 
-        // Ждём завершения handshake
+        instantiateHandshake(peerName);
         SessionContext context = sessions.get(peerName);
         boolean ok = context.getHandshakeResult().get(10, TimeUnit.SECONDS);
         if (!ok) {
@@ -324,6 +323,7 @@ public class ChatClientCore {
         }
         try{
             String plainText = AesCrypto.decrypt(msg.e2ePayload, session.getSessionKey());
+            session.touch();
             listener.onMessage(msg.fromClientName, plainText);
         }catch (Exception e){
             listener.onDecryptionFailed(msg.fromClientName);
