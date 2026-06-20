@@ -38,6 +38,7 @@ public class ChatHandler implements Runnable {
     @Override
     public void run() {
         try {
+            clientSocket.setKeepAlive(true);
             in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             out = new PrintWriter(clientSocket.getOutputStream(), true);
             System.out.println("[ChatHandler] client connected: " + clientSocket.getRemoteSocketAddress());

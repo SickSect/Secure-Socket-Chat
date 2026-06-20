@@ -66,6 +66,7 @@ public class ChatClientCore {
 
         try {
             socketCache = new Socket(HOST, PORT);
+            socketCache.setKeepAlive(true);
             in = new BufferedReader(new InputStreamReader(socketCache.getInputStream()));
             out = new PrintWriter(socketCache.getOutputStream(), true);
             stdin = new BufferedReader(new InputStreamReader(System.in));
