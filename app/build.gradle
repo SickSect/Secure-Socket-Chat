@@ -54,6 +54,8 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
+    implementation 'com.bucket4j:bucket4j-core:8.10.1'
+
 // BCrypt для паролей — приходит с spring-security, явная не нужна
 
 // Тесты Spring Boot

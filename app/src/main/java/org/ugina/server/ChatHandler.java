@@ -59,7 +59,8 @@ public class ChatHandler implements Runnable {
                 }
             }
         } catch (Exception e) {
-            System.out.println("[ChatHandler] client disconnected: " + clientSocket.getRemoteSocketAddress());
+            String who = (clientName != null) ? clientName : clientSocket.getRemoteSocketAddress().toString();
+            System.out.println("[ChatHandler] client disconnected: " + who);
         } finally {
             room.leaveClient(clientName);
         }

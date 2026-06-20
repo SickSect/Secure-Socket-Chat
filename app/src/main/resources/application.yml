@@ -5,6 +5,14 @@ chat:
   tcp-port: 5000  # порт нашего TCP-чата
   tcp-enabled: false # ChatServerStarter не создаётся в тестах
 
+rate-limit:
+  register:
+    capacity: 5        # 5 регистраций
+    period-minutes: 60 # за час
+  login:
+    capacity: 10       # 10 попыток логина
+    period-minutes: 60 # за час
+
 spring:
   # Пока без БД и Security — отключим автоконфиги, иначе Spring упадёт при старте
   autoconfigure:

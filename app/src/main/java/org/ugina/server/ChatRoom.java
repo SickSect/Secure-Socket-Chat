@@ -16,13 +16,10 @@ import java.util.concurrent.TimeUnit;
 public class ChatRoom {
     private ConcurrentHashMap<String, ChatHandler> clientHandlers = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, PublicKey> clientPublicKeys = new ConcurrentHashMap<>();
-    private final ObjectMapper mapper = new ObjectMapper();
-    private SecretKey secretKey;
     private final ConcurrentHashMap<String, Long> nonces = new ConcurrentHashMap<>();
     private static final long NONCE_TTL_MS = 60_000;
 
     public ChatRoom() throws GeneralSecurityException {
-        secretKey = KeyLoader.getSecretKey();
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor( r -> {
             Thread thread = new Thread( r, "nonce-cleaner" );
             thread.setDaemon( true );
@@ -48,7 +45,6 @@ public class ChatRoom {
 
     public boolean joinClient(String clientName, ChatHandler chatHandler, PublicKey key){
         ChatHandler existing = clientHandlers.putIfAbsent(clientName, chatHandler);
-        //ClientStatus status = clientStatuses.get(clientName);
         if (existing != null) {
             System.out.println("[joinClient] name taken: " + clientName);
             return false;
@@ -100,8 +96,6 @@ public class ChatRoom {
     private void sendTo(ChatHandler handler, ServerMessage msg) {
         if (handler == null) return;
         try {
-            String json = mapper.writeValueAsString(msg);
-            String encrypted = AesCrypto.encrypt(json, secretKey);
             handler.send(msg);
         } catch (Exception e) {
             System.err.println("[ChatRoom] send failed: " + e.getMessage());

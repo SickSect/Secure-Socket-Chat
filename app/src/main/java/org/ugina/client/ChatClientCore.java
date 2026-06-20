@@ -41,6 +41,8 @@ public class ChatClientCore {
     private PrintWriter out;
     private BufferedReader stdin;
 
+    private volatile boolean connected = true;
+
     private Socket socketCache;
 
     public ChatClientCore(
@@ -80,6 +82,7 @@ public class ChatClientCore {
             throw new RuntimeException("[ERROR] Could not connect to server!");
         }
         joinResult = new CompletableFuture<>();
+        connected = true;
         startReaderThread();
         sendRaw(ClientMessage.join(username, publicKey));
         try {
@@ -111,6 +114,10 @@ public class ChatClientCore {
     }
 
     public void sendMessage(String recipient, String text) throws Exception {
+        if (!connected) {
+            listener.onError("DISCONNECTED", "Not connected to server");
+            return;
+        }
         SessionContext session;
         try{
             session = getOrEstablishSession(recipient);
@@ -138,8 +145,11 @@ public class ChatClientCore {
                     ServerMessage msg = mapper.readValue(decoded, ServerMessage.class);
                     handleIncoming(msg);
                 }
+                connected = false;
+                listener.onConnectionLost();
             } catch (Exception ex) {
-                System.err.println("[ERROR][startReaderThread] Error while reading server message!");
+                connected = false;
+                listener.onConnectionLost();
             }
         }, "client-reader-thread");
         thread.setDaemon(true);
