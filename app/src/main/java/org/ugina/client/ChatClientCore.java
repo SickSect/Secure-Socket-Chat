@@ -42,7 +42,7 @@ public class ChatClientCore {
     private BufferedReader stdin;
 
     private volatile boolean connected = true;
-
+    private volatile boolean sessionsDestroyed = false;
     private Socket socketCache;
 
     public ChatClientCore(
@@ -106,7 +106,37 @@ public class ChatClientCore {
                 socketCache.close();
         } catch (Exception e) {
             System.err.println("[ERROR] Error while trying to disconnect from server!");
+        }finally {
+            destroyAllSessions();   // ← затираем ключи при выходе
+            connected = false;
         }
+    }
+
+    /**
+     * Затирает и удаляет все активные сессии.
+     * Вызывается при отключении от сервера.
+     */
+    private synchronized void destroyAllSessions() {
+        if (sessionsDestroyed) {
+            return;   // уже затёрли — выходим
+        }
+        sessionsDestroyed = true;
+
+        for (SessionContext session : sessions.values()) {
+            try {
+                session.destroy();
+            } catch (Exception e) { }
+        }
+        sessions.clear();
+        sessions.clear();
+        for (SessionContext session : sessions.values()) {
+            try {
+                session.destroy();
+            } catch (Exception e) {
+                // best effort — продолжаем чистить остальные
+            }
+        }
+        sessions.clear();
     }
 
     public void sendMessage(String recipient, String text) throws Exception {
@@ -142,9 +172,11 @@ public class ChatClientCore {
                     handleIncoming(msg);
                 }
                 connected = false;
+                destroyAllSessions();
                 listener.onConnectionLost();
             } catch (Exception ex) {
                 connected = false;
+                destroyAllSessions();
                 listener.onConnectionLost();
             }
         }, "client-reader-thread");
