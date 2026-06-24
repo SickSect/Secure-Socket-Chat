@@ -41,6 +41,8 @@ public class ChatClientCore {
     private PrintWriter out;
     private BufferedReader stdin;
 
+    private volatile boolean connected = true;
+    private volatile boolean sessionsDestroyed = false;
     private Socket socketCache;
 
     public ChatClientCore(
@@ -76,6 +78,7 @@ public class ChatClientCore {
             throw new RuntimeException("[ERROR] Could not connect to server!");
         }
         joinResult = new CompletableFuture<>();
+        connected = true;
         startReaderThread();
         sendRaw(ClientMessage.join(jwt));
         try {
@@ -103,10 +106,44 @@ public class ChatClientCore {
                 socketCache.close();
         } catch (Exception e) {
             System.err.println("[ERROR] Error while trying to disconnect from server!");
+        }finally {
+            destroyAllSessions();   // ← затираем ключи при выходе
+            connected = false;
         }
     }
 
+    /**
+     * Затирает и удаляет все активные сессии.
+     * Вызывается при отключении от сервера.
+     */
+    private synchronized void destroyAllSessions() {
+        if (sessionsDestroyed) {
+            return;   // уже затёрли — выходим
+        }
+        sessionsDestroyed = true;
+
+        for (SessionContext session : sessions.values()) {
+            try {
+                session.destroy();
+            } catch (Exception e) { }
+        }
+        sessions.clear();
+        sessions.clear();
+        for (SessionContext session : sessions.values()) {
+            try {
+                session.destroy();
+            } catch (Exception e) {
+                // best effort — продолжаем чистить остальные
+            }
+        }
+        sessions.clear();
+    }
+
     public void sendMessage(String recipient, String text) throws Exception {
+        if (!connected) {
+            listener.onError("DISCONNECTED", "Not connected to server");
+            return;
+        }
         SessionContext session;
         try{
             session = getOrEstablishSession(recipient);
@@ -134,8 +171,13 @@ public class ChatClientCore {
                     ServerMessage msg = mapper.readValue(decoded, ServerMessage.class);
                     handleIncoming(msg);
                 }
+                connected = false;
+                destroyAllSessions();
+                listener.onConnectionLost();
             } catch (Exception ex) {
-                System.err.println("[ERROR][startReaderThread] Error while reading server message!");
+                connected = false;
+                destroyAllSessions();
+                listener.onConnectionLost();
             }
         }, "client-reader-thread");
         thread.setDaemon(true);
@@ -268,6 +310,7 @@ public class ChatClientCore {
 
         // Сессия истекла — убираем старую перед новым handshake
         if (existing != null && existing.isExpired()) {
+            existing.destroy();
             sessions.remove(peerName);
             listener.onSystem("Session with " + peerName + " expired, re-establishing...");
         }

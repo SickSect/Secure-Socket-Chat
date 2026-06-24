@@ -1,7 +1,7 @@
 package org.ugina.client;
 
 import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
+import javax.security.auth.Destroyable;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.time.Duration;
@@ -40,7 +40,7 @@ public class SessionContext {
 
 
     public void completeHandshake(byte[] sessionKeyBytes){
-        this.sessionKey = new SecretKeySpec(sessionKeyBytes, "AES");
+        this.sessionKey = new DestroyableSecretKey(sessionKeyBytes, "AES");  // ← было SecretKeySpec
         this.ephemeralKeyPair = null;
         this.state = State.READY;
         this.lastActivityAt = Instant.now();
@@ -62,6 +62,30 @@ public class SessionContext {
         this.ephemeralKeyPair = null;
         this.state = State.FAILED;
         this.handshakeResult.complete(false);
+    }
+
+    /**
+     * Явно уничтожить криптографический материал сессии.
+     * Затирает session_key (через его собственный destroy) и эфемерные ключи.
+     * Вызывается когда сессия истекла или завершена.
+     */
+    public void destroy() {
+        // Затираем session_key через его собственный destroy()
+        // DestroyableSecretKey.destroy() занулит свой внутренний массив
+        if (sessionKey instanceof Destroyable destroyable) {
+            try {
+                destroyable.destroy();
+            } catch (Exception e) {
+                // best effort — даже если не вышло, обнулим ссылку ниже
+            }
+        }
+        sessionKey = null;
+
+        // Обнуляем эфемерные ключи
+        ephemeralKeyPair = null;
+
+        // Помечаем что сессия мертва
+        state = State.FAILED;
     }
 
     public String getPeerName() {
