@@ -114,7 +114,8 @@ public class ChatClientCore {
 
     /**
      * Затирает и удаляет все активные сессии.
-     * Вызывается при отключении от сервера.
+     * Идемпотентно — повторный вызов безопасен (guard-флаг).
+     * Вызывается при отключении от сервера или штатном выходе.
      */
     private synchronized void destroyAllSessions() {
         if (sessionsDestroyed) {
@@ -122,13 +123,6 @@ public class ChatClientCore {
         }
         sessionsDestroyed = true;
 
-        for (SessionContext session : sessions.values()) {
-            try {
-                session.destroy();
-            } catch (Exception e) { }
-        }
-        sessions.clear();
-        sessions.clear();
         for (SessionContext session : sessions.values()) {
             try {
                 session.destroy();
