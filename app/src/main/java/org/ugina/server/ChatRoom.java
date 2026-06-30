@@ -99,13 +99,7 @@ public class ChatRoom {
 
     private void sendTo(ChatHandler handler, ServerMessage msg) {
         if (handler == null) return;
-        try {
-            String json = mapper.writeValueAsString(msg);
-            String encrypted = AesCrypto.encrypt(json, secretKey);
-            handler.send(msg);
-        } catch (Exception e) {
-            System.err.println("[ChatRoom] send failed: " + e.getMessage());
-        }
+        handler.send(msg);   // send сам сериализует и шифрует
     }
 
     public boolean registerKey(String clientName, PublicKey key){

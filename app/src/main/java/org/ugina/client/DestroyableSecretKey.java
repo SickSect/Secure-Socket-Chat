@@ -46,24 +46,11 @@ public final class DestroyableSecretKey implements SecretKey, Destroyable {
         return Arrays.copyOf(key, key.length);
     }
 
-    // ВРЕМЕННЫЙ — для диагностики, убрать после проверки
-    private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
     @Override
     public void destroy() {
         if (!destroyed) {
-            // ВРЕМЕННАЯ ДИАГНОСТИКА — убрать после проверки
-            System.out.println("[DESTROY] key before: " + bytesToHex(key));
             Arrays.fill(key, (byte) 0);
             destroyed = true;
-            // ВРЕМЕННАЯ ДИАГНОСТИКА
-            System.out.println("[DESTROY] key after:  " + bytesToHex(key));
         }
     }
 
@@ -85,6 +72,7 @@ public final class DestroyableSecretKey implements SecretKey, Destroyable {
         SecretKey other = (SecretKey) o;
         if (!algorithm.equalsIgnoreCase(other.getAlgorithm())) return false;
         // Constant-time compare to avoid timing leaks
+        if (this.destroyed) return false;
         return MessageDigest.isEqual(this.getEncoded(), other.getEncoded());
     }
 

@@ -54,7 +54,7 @@ public class SessionContext {
     public boolean isExpired(){
         Instant now = Instant.now();
         boolean idleExpired = Duration.between(lastActivityAt, now).compareTo(IDLE_TIMEOUT) > 0;
-        boolean absoluteExpired = Duration.between(lastActivityAt, now).compareTo(ABSOLUTE_TIMEOUT) > 0;
+        boolean absoluteExpired = Duration.between(createdAt, now).compareTo(ABSOLUTE_TIMEOUT) > 0;
         return idleExpired || absoluteExpired;
     }
 
