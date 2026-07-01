@@ -26,7 +26,6 @@ public class ChatClientCore {
     private final String HOST;
     private final int PORT;
     private final SecretKey PSK_KEY;
-    private KeyStorage keyStorage;
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
@@ -34,12 +33,10 @@ public class ChatClientCore {
     private final ConcurrentHashMap<String, SessionContext> sessions = new ConcurrentHashMap<>();
     private CompletableFuture<Boolean> joinResult;
 
-    private PublicKey publicKey;
     private PrivateKey privateKey;
 
     private BufferedReader in;
     private PrintWriter out;
-    private BufferedReader stdin;
 
     private volatile boolean connected = true;
     private volatile boolean sessionsDestroyed = false;
@@ -63,7 +60,6 @@ public class ChatClientCore {
      * @return true если JOIN успешен
      */
     public boolean connect(String jwt, KeyPair keyPair) throws Exception {
-        this.publicKey = keyPair.getPublic();
         this.privateKey = keyPair.getPrivate();
 
         try {
@@ -71,7 +67,6 @@ public class ChatClientCore {
             socketCache.setKeepAlive(true);
             in = new BufferedReader(new InputStreamReader(socketCache.getInputStream()));
             out = new PrintWriter(socketCache.getOutputStream(), true);
-            stdin = new BufferedReader(new InputStreamReader(System.in));
 
         } catch (Exception e) {
             System.err.println("[ERROR] Could not connect to server!");
@@ -85,16 +80,6 @@ public class ChatClientCore {
             return joinResult.get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             return false;
-        }
-    }
-
-    private KeyPair loadOrCreateKeys(char[] password) throws Exception {
-        if (keyStorage.exists())
-            return keyStorage.load(password);
-        else {
-            KeyPair keyPair = RsaCrypto.generateKeyPair();
-            keyStorage.save(keyPair, password);
-            return keyPair;
         }
     }
 

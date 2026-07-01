@@ -86,11 +86,8 @@ public class ChatRoom {
             return ;
         }
 
-        ServerMessage dm = new ServerMessage();
-        dm.type = MessageType.DM;
-        dm.e2ePayload = clientMessage.e2ePayload;
-        dm.fromClientName = clientName;
-        sendTo(recipient, dm);
+        sendTo(recipient, ServerMessage.dm(clientName, clientMessage.e2ePayload));
+        sendTo(client, ServerMessage.delivered());
 
         ServerMessage approve = new ServerMessage();
         approve.type = MessageType.DELIVERED;
@@ -102,15 +99,7 @@ public class ChatRoom {
         handler.send(msg);   // send сам сериализует и шифрует
     }
 
-    public boolean registerKey(String clientName, PublicKey key){
-        return clientPublicKeys.putIfAbsent(clientName, key) == null;
-    }
-
     public PublicKey getPublicKey(String clientName){
         return clientPublicKeys.get(clientName);
-    }
-
-    public void removeKey(String clientName){
-        clientPublicKeys.remove(clientName);
     }
 }
