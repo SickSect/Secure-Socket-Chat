@@ -12,7 +12,6 @@ auth:
     expiration-minutes: 60
 
 spring:
-  # Пока без БД и Security — отключим автоконфиги, иначе Spring упадёт при старте
   autoconfigure:
     exclude:
       #- org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
