@@ -37,3 +37,11 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+
+rate-limit:
+  register:
+    capacity: 5
+    period-minutes: 60
+  login:
+    capacity: 10
+    period-minutes: 60

@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.ugina.auth.exceptions.AuthenticationException;
 import org.ugina.auth.exceptions.RegistrationException;
+import org.ugina.ratelimit.RateLimitExceededException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -45,5 +46,14 @@ public class GlobalExceptionHandler {
         response.put("message", ex.getMessage());
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleRateLimit(
+            RateLimitExceededException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("error", "RATE_LIMIT_EXCEEDED");
+        response.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
     }
 }
