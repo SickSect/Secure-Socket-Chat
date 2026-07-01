@@ -34,20 +34,15 @@ public class ConsoleTui implements ChatEventListener {
 
             if ("1".equals(choice)) {
                 handleRegister(stdin);
-                // после регистрации просим залогиниться
                 System.out.println("Now login with your credentials.");
             }
 
-            // в обоих случаях дальше — логин
-            String jwt = handleLogin(stdin);
-            if (jwt == null) {
+            LoginResult login = handleLogin(stdin);
+            if (login == null) {
                 return;  // логин не удался, сообщение уже выведено
             }
 
-            // подключаемся к чату
-            String loginName = lastLoginUsername;
-            KeyPair keyPair = keyManager.load(loginName, lastLoginPassword);
-            boolean joined = core.connect(jwt, keyPair);
+            boolean joined = core.connect(login.jwt(), login.keyPair());
             if (!joined) {
                 System.out.println("Could not join chat — token rejected or server unreachable");
                 return;
@@ -58,10 +53,6 @@ public class ConsoleTui implements ChatEventListener {
             core.disconnect();
         }
     }
-
-    // временные поля чтобы пробросить креды от login к connect
-    private String lastLoginUsername;
-    private char[] lastLoginPassword;
 
     private void handleRegister(BufferedReader stdin) throws Exception {
         System.out.print("Choose username: ");
@@ -91,7 +82,7 @@ public class ConsoleTui implements ChatEventListener {
         }
     }
 
-    private String handleLogin(BufferedReader stdin) throws Exception {
+    private LoginResult handleLogin(BufferedReader stdin) throws Exception {
         System.out.print("Username: ");
         String username = stdin.readLine();
         System.out.print("Password: ");
@@ -108,12 +99,16 @@ public class ConsoleTui implements ChatEventListener {
             return null;
         }
 
-        // сохраняем для последующей загрузки ключей
-        lastLoginUsername = username;
-        lastLoginPassword = password.toCharArray();
+        char[] passwordChars = password.toCharArray();
+        KeyPair keyPair;
+        try {
+            keyPair = keyManager.load(username, passwordChars);
+        } finally {
+            java.util.Arrays.fill(passwordChars, '\0');  // затираем пароль сразу после использования
+        }
 
         System.out.println("Logged in successfully!");
-        return jwt;
+        return new LoginResult(jwt, username, keyPair);
     }
 
     private void runChatLoop(BufferedReader stdin) throws Exception {
