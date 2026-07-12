@@ -5,15 +5,14 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.ugina.Dto.LoginRequest;
-import org.ugina.Dto.LoginResponse;
-import org.ugina.Dto.RegisterRequest;
-import org.ugina.auth.AuthProvider;
-import org.ugina.auth.AuthToken;
-import org.ugina.auth.UserPrincipal;
+import org.ugina.Dto.*;
+import org.ugina.auth.*;
 import org.ugina.auth.exceptions.AuthenticationException;
+import org.ugina.auth.exceptions.InvalidTokenException;
+import org.ugina.entity.User;
 import org.ugina.ratelimit.RateLimitExceededException;
 import org.ugina.ratelimit.RateLimitService;
+import org.ugina.repository.UserRepository;
 
 import java.util.Map;
 
@@ -23,10 +22,19 @@ public class AuthController {
 
     private final AuthProvider authProvider;
     private final RateLimitService rateLimitService;
+    private final UserRepository userRepository;
+    private final RefreshTokenService refreshTokenService;
+    private final JwtService jwtService;
 
-    public AuthController(AuthProvider authProvider, RateLimitService rateLimitService) {
+    public AuthController(AuthProvider authProvider,
+                          RateLimitService rateLimitService,
+                          UserRepository userRepository,
+                          RefreshTokenService refreshTokenService, JwtService jwtService) {
         this.authProvider = authProvider;
         this.rateLimitService = rateLimitService;
+        this.userRepository = userRepository;
+        this.refreshTokenService = refreshTokenService;
+        this.jwtService = jwtService;
     }
 
 
@@ -48,7 +56,6 @@ public class AuthController {
         System.out.println("[register] received: username=" + request.username()
                 + ", publicKey length="
                 + (request.publicKey() != null ? request.publicKey().length() : 0));
-
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "status", "registered",
                 "username", principal.username()
@@ -63,6 +70,19 @@ public class AuthController {
             throw new RateLimitExceededException("Too many login attempts. Try again later.");
         }
         AuthToken token = authProvider.authenticate(request.username(), request.password());
-        return ResponseEntity.ok(new LoginResponse(token.value(), token.expiresAt()));
+        // TODO исправь, а то каждый логин создает новый рефреш токен
+        User user = userRepository.findByUsername(request.username()).orElseThrow(() -> new AuthenticationException("Invalid username or password"));
+        String refreshToken = refreshTokenService.create(user.getId());
+        return ResponseEntity.ok(new LoginResponse(token.value(), refreshToken, token.expiresAt()));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<RefreshResponse> refresh(@Valid @RequestBody RefreshRequest request) throws InvalidTokenException, AuthenticationException {
+        Long userId = refreshTokenService.validateAndGetUserId(request.refreshToken());
+        User user = userRepository.findById(userId).orElseThrow(() -> new InvalidTokenException("Token references unknown user"));
+        AuthToken authToken = jwtService.generateToken(user.getUsername());
+        return ResponseEntity.ok(new RefreshResponse(
+                authToken.value(),
+                authToken.expiresAt()));
     }
 }

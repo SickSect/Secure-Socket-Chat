@@ -68,4 +68,10 @@ public class JwtService {
                 .plus(expirationMinutes, ChronoUnit.MINUTES)
                 .toEpochMilli();
     }
+
+    public AuthToken generateToken(String username) {
+        String tokenValue = generate(username);
+        long expiresAt = getExpirationMillis();
+        return new AuthToken(tokenValue, expiresAt);
+    }
 }

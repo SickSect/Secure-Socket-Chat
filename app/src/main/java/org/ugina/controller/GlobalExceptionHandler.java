@@ -6,6 +6,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.ugina.auth.exceptions.AuthenticationException;
+import org.ugina.auth.exceptions.InvalidTokenException;
 import org.ugina.auth.exceptions.RegistrationException;
 import org.ugina.ratelimit.RateLimitExceededException;
 
@@ -55,5 +56,14 @@ public class GlobalExceptionHandler {
         response.put("error", "RATE_LIMIT_EXCEEDED");
         response.put("message", ex.getMessage());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
+    }
+
+    @ExceptionHandler(InvalidTokenException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidToken(
+            InvalidTokenException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("error", "INVALID_TOKEN");
+        response.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 }

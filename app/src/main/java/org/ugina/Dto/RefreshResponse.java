@@ -1,8 +1,7 @@
 package org.ugina.Dto;
 
-public record LoginResponse(
+public record RefreshResponse(
         String token,
-        String refreshToken,
         long expiresAt
 ) {
 }
