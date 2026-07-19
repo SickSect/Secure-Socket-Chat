@@ -42,7 +42,7 @@ public class ConsoleTui implements ChatEventListener {
                 return;  // логин не удался, сообщение уже выведено
             }
 
-            boolean joined = core.connect(login.jwt(), login.keyPair());
+            boolean joined = core.connect(login.jwt(), login.keyPair(), authClient::refresh);
             if (!joined) {
                 System.out.println("Could not join chat — token rejected or server unreachable");
                 return;

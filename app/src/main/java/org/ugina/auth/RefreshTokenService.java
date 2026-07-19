@@ -1,7 +1,6 @@
 package org.ugina.auth;
 
 import org.springframework.stereotype.Service;
-import org.ugina.auth.exceptions.AuthenticationException;
 import org.ugina.auth.exceptions.InvalidTokenException;
 import org.ugina.entity.RefreshToken;
 import org.ugina.repository.RefreshTokenRepository;
@@ -41,9 +40,9 @@ public class RefreshTokenService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    public Long validateAndGetUserId(String token) throws AuthenticationException, InvalidTokenException {
+    public Long validateAndGetUserId(String token) throws InvalidTokenException {
         RefreshToken entity = refreshTokenRepository.findByToken(token).orElseThrow( () ->
-                new AuthenticationException("Refresh token not found"));
+                new InvalidTokenException("Refresh token not found"));
         if (entity.getExpiresAt().isBefore(Instant.now())) {
             refreshTokenRepository.delete(entity);
             throw new InvalidTokenException("Refresh token expired");

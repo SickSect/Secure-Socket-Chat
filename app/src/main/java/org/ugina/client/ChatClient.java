@@ -7,8 +7,8 @@ public class ChatClient {
 
     public static void main(String[] args) {
         try {
-            ConsoleTui tui = new ConsoleTui("http://localhost:8080");
-            ChatClientCore core = new ChatClientCore(tui, "localhost", 5000);
+            ConsoleTui tui = new ConsoleTui("http://" + HOST + ":8080");
+            ChatClientCore core = new ChatClientCore(tui, "localhost", PORT);
             tui.setCore(core);
             tui.run();
         } catch (Exception e) {

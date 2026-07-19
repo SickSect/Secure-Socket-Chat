@@ -70,7 +70,6 @@ public class AuthController {
             throw new RateLimitExceededException("Too many login attempts. Try again later.");
         }
         AuthToken token = authProvider.authenticate(request.username(), request.password());
-        // TODO исправь, а то каждый логин создает новый рефреш токен
         User user = userRepository.findByUsername(request.username()).orElseThrow(() -> new AuthenticationException("Invalid username or password"));
         String refreshToken = refreshTokenService.create(user.getId());
         return ResponseEntity.ok(new LoginResponse(token.value(), refreshToken, token.expiresAt()));
