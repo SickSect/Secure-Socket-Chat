@@ -111,6 +111,22 @@ public class AuthClient {private final String baseUrl;
         return (String) parsed.get("token");   // новый access token
     }
 
+    public void logout() throws IOException, InterruptedException {
+        if (refreshToken == null)
+            return;
+        String body = mapper.writeValueAsString(Map.of("refreshToken", refreshToken));
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/api/auth/logout"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+
+        httpClient.send(
+                request, HttpResponse.BodyHandlers.ofString()
+        );
+        this.refreshToken = null;
+    }
+
     /**
      * @return the stored refresh token, or null if not logged in yet
      */

@@ -124,7 +124,14 @@ public class ConsoleTui implements ChatEventListener {
     }
 
     private boolean handleInput(String input) throws Exception {
-        if (input.equals("/quit")) return false;
+        if (input.equals("/quit")) {
+            try {
+                authClient.logout();
+            } catch (Exception e) {
+                // best-effort
+            }
+            return false;
+        }
 
         if (input.equals("/help")) {
             printWelcome();

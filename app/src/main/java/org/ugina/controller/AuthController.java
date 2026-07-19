@@ -84,4 +84,10 @@ public class AuthController {
                 authToken.value(),
                 authToken.expiresAt()));
     }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@Valid @RequestBody LogoutRequest request) throws InvalidTokenException {
+        refreshTokenService.revoke(request.refreshToken());
+        return ResponseEntity.noContent().build();
+    }
 }

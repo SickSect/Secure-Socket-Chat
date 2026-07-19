@@ -49,4 +49,10 @@ public class RefreshTokenService {
         }
         return entity.getUserId();
     }
+
+    public void revoke(String token) throws InvalidTokenException {
+        RefreshToken entity = refreshTokenRepository.findByToken(token).orElseThrow( () ->
+                new InvalidTokenException("Refresh token not found"));
+        refreshTokenRepository.delete(entity);
+    }
 }
