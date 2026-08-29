@@ -11,6 +11,10 @@ import org.ugina.protocol.ErrorCode;
 import org.ugina.protocol.ServerMessage;
 
 import javax.crypto.SecretKey;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -61,12 +65,25 @@ public class ChatClientCore {
      */
     public boolean connect(String jwt, KeyPair keyPair) throws Exception {
         this.privateKey = keyPair.getPrivate();
+        // TODO часть вынести в кфг,а другую часть - нужно убрать в секретное хранилище данных!
+        Path trustedstorePath = Path.of("certs/client-truststore.p12");
+        char[] trustedPassword = "changeit".toCharArray();
 
-        try {
-            socketCache = new Socket(HOST, PORT);
-            socketCache.setKeepAlive(true);
-            in = new BufferedReader(new InputStreamReader(socketCache.getInputStream()));
-            out = new PrintWriter(socketCache.getOutputStream(), true);
+        SSLContext sslContext = TlsClientContextFactory.createSSLContext(trustedstorePath, trustedPassword);
+        SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+        System.out.println("Connecting to " + HOST + ":" + PORT + " via TLS...");
+        try (SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(HOST, PORT)) {
+            sslSocket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"}); //SETUP PROTOCOLS PARAMS
+            SSLParameters sslParameters = sslSocket.getSSLParameters();
+            sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
+            sslSocket.setSSLParameters(sslParameters);
+            sslSocket.startHandshake(); // MAKE A HANDSHAKE
+            System.out.println("TLS Handshake successful! Protocol: " + sslSocket.getSession().getProtocol());
+            System.out.println("Cipher Suite: " + sslSocket.getSession().getCipherSuite());
+
+            sslSocket.setKeepAlive(true);
+            in = new BufferedReader(new InputStreamReader(sslSocket.getInputStream()));
+            out = new PrintWriter(sslSocket.getOutputStream(), true);
 
         } catch (Exception e) {
             System.err.println("[ERROR] Could not connect to server!");
@@ -91,7 +108,7 @@ public class ChatClientCore {
                 socketCache.close();
         } catch (Exception e) {
             System.err.println("[ERROR] Error while trying to disconnect from server!");
-        }finally {
+        } finally {
             destroyAllSessions();   // ← затираем ключи при выходе
             connected = false;
         }
@@ -124,9 +141,9 @@ public class ChatClientCore {
             return;
         }
         SessionContext session;
-        try{
+        try {
             session = getOrEstablishSession(recipient);
-        }catch (Exception e){
+        } catch (Exception e) {
             listener.onError("SESSION_FAILED", "Could not establish session with " + recipient + ": " + e.getMessage());
             return;
         }
@@ -186,17 +203,17 @@ public class ChatClientCore {
         byte[] ephemeralPubBytes = ephemeralKeyPair.getPublic().getEncoded();
         byte[] signature = RsaSignature.sign(ephemeralPubBytes, this.privateKey);
         String signatureBase64 = Base64.getEncoder().encodeToString(signature);
-        SessionContext context = new SessionContext(peerName,ephemeralKeyPair);
+        SessionContext context = new SessionContext(peerName, ephemeralKeyPair);
         sessions.put(peerName, context);
         sendRaw(ClientMessage.initSession(peerName, ephPubBase64, signatureBase64));
     }
 
-    public void handleInitSession(ServerMessage msg){
+    public void handleInitSession(ServerMessage msg) {
         new Thread(() -> handleInitSessionAsync(msg), "handshake-handler").start();
     }
 
     private void handleInitSessionAsync(ServerMessage msg) {
-        try{
+        try {
             String peerName = msg.fromClientName;
             PublicKey peerRsaPublicKey = keyCache.get(peerName);
             if (peerRsaPublicKey == null) {
@@ -217,7 +234,7 @@ public class ChatClientCore {
             byte[] sharedSecret = EcdhCrypto.computeSharedSecret(ownEphemeralKeyPair.getPrivate(), peerEphemeralPub);
             byte[] sessionKeyBytes = HkdfCrypto.derive(sharedSecret, null, "secure-chat-session", 32);
 
-            SessionContext context = new SessionContext(peerName,ownEphemeralKeyPair);
+            SessionContext context = new SessionContext(peerName, ownEphemeralKeyPair);
             sessions.put(peerName, context);
             context.completeHandshake(sessionKeyBytes);
 
@@ -230,13 +247,12 @@ public class ChatClientCore {
             sendRaw(ClientMessage.sessionAck(peerName, myEphemeralPubBase64, mySignatureBase64));
 
             listener.onSystem("Session established with " + peerName);
-        }catch(Exception e){
+        } catch (Exception e) {
             listener.onError("HANDSHAKE_FAILED", "Failed to handle INIT_SESSION: " + e.getMessage());
         }
     }
 
-    private void handleSessionAck(ServerMessage msg)
-    {
+    private void handleSessionAck(ServerMessage msg) {
         try {
             String peerName = msg.fromClientName;
 
@@ -333,11 +349,11 @@ public class ChatClientCore {
             listener.onDecryptionFailed(msg.fromClientName);
             return;
         }
-        try{
+        try {
             String plainText = AesCrypto.decrypt(msg.e2ePayload, session.getSessionKey());
             session.touch();
             listener.onMessage(msg.fromClientName, plainText);
-        }catch (Exception e){
+        } catch (Exception e) {
             listener.onDecryptionFailed(msg.fromClientName);
         }
     }
@@ -351,7 +367,7 @@ public class ChatClientCore {
     }
 
     private void handleERROR(ServerMessage msg) {
-        if (joinResult != null && !joinResult.isDone()){
+        if (joinResult != null && !joinResult.isDone()) {
             joinResult.complete(false);
         }
         try {

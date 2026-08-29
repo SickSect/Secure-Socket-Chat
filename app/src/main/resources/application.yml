@@ -1,6 +1,13 @@
 server:
   port: 8080  # порт встроенного Tomcat для будущих REST endpoints
-
+  ssl:
+    enabled: true
+    key-store: classpath:certs/server-keystore.p12
+    key-store-type: PKCS12
+    key-store-password: changeit
+    key-password: changeit
+    key-alias: server
+    enabled-protocols: TLSv1.2,TLSv1.3
 chat:
   tcp-port: 5000  # порт нашего TCP-чата
   tcp-enabled: false # ChatServerStarter не создаётся в тестах
