@@ -30,6 +30,7 @@ public class ChatClientCore {
     private final String HOST;
     private final int PORT;
     private final SecretKey PSK_KEY;
+    private SSLSocket sslSocket;
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
@@ -44,7 +45,6 @@ public class ChatClientCore {
 
     private volatile boolean connected = true;
     private volatile boolean sessionsDestroyed = false;
-    private Socket socketCache;
 
     public ChatClientCore(
             ChatEventListener listener,
@@ -72,7 +72,8 @@ public class ChatClientCore {
         SSLContext sslContext = TlsClientContextFactory.createSSLContext(trustedstorePath, trustedPassword);
         SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
         System.out.println("Connecting to " + HOST + ":" + PORT + " via TLS...");
-        try (SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(HOST, PORT)) {
+        try {
+            sslSocket = (SSLSocket) sslSocketFactory.createSocket(HOST, PORT);
             sslSocket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"}); //SETUP PROTOCOLS PARAMS
             SSLParameters sslParameters = sslSocket.getSSLParameters();
             sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
@@ -104,8 +105,8 @@ public class ChatClientCore {
         try {
             if (out != null)
                 sendRaw(ClientMessage.quit());
-            if (socketCache != null)
-                socketCache.close();
+            if (sslSocket != null)
+                sslSocket.close();
         } catch (Exception e) {
             System.err.println("[ERROR] Error while trying to disconnect from server!");
         } finally {
