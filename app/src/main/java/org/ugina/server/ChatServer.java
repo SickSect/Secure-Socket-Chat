@@ -7,9 +7,13 @@ import org.ugina.crypto.KeyLoader;
 import org.ugina.utils.CustomLogger;
 
 import javax.crypto.SecretKey;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.SSLServerSocketFactory;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -33,10 +37,18 @@ public class ChatServer {
         this.authProvider = authProvider;
     }
 
-    public void start(){
+    public void start() throws Exception {
         CustomLogger.logInfo("Start chat server...", ChatServer.class.getName());
         ExecutorService executor = null;
-        try(ServerSocket serverSocket = new ServerSocket(this.port)){
+
+        Path keystorePath = Path.of("certs/server-keystore.p12");
+        char[] keystorePassword = "changeit".toCharArray();
+
+        SSLContext sslContext = TlsServerContextFactory.createSSLContext(keystorePath, keystorePassword);
+        SSLServerSocketFactory factory = sslContext.getServerSocketFactory();
+        SSLServerSocket serverSocket = (SSLServerSocket) factory.createServerSocket(port);
+        serverSocket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
+        try{
             executor = Executors.newCachedThreadPool();
             CustomLogger.logInfo("Waiting for client...", ChatServer.class.getName());
             ChatRoom room = new ChatRoom();
