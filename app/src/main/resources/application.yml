@@ -1,11 +1,11 @@
 server:
-  port: 8080  # порт встроенного Tomcat для будущих REST endpoints
+  port: 8443  # порт встроенного Tomcat для будущих REST endpoints
   ssl:
     enabled: true
-    key-store: file:../certs/server-keystore.p12
+    key-store: ${TLS_KEYSTORE:file:../certs/server-keystore.p12}
     key-store-type: PKCS12
-    key-store-password: changeit
-    key-password: changeit
+    key-store-password:  ${TLS_KEYSTORE_PASSWORD:}
+    key-password: ${TLS_KEY_PASSWORD:${TLS_KEYSTORE_PASSWORD:}}
     key-alias: server
     enabled-protocols: TLSv1.2,TLSv1.3
 chat:
@@ -28,8 +28,8 @@ spring:
       - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   datasource:
     url: jdbc:postgresql://localhost:5432/secure_chat
-    username: postgres
-    password: 21062007
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:

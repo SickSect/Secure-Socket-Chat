@@ -30,12 +30,12 @@
 *.pem
 
 # Certs folder generally
-certs/
+app/certs/
 
 # But allow useful non-secret files if needed
-!certs/.gitkeep
-!certs/README.md
-!certs/generate-dev-certs.sh
+!app/certs/.gitkeep
+!app/certs/README.md
+!app/certs/generate-dev-certs.sh
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
