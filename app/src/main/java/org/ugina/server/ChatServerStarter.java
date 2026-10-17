@@ -1,42 +1,56 @@
 package org.ugina.server;
 
-import org.springframework.boot.CommandLineRunner;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 import org.ugina.auth.AuthProvider;
-import org.ugina.config.ChatProperties;
-import org.ugina.utils.CustomLogger;
+import org.ugina.config.ChatTlsConfig;
+import org.ugina.config.ChatTlsProperties;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "chat.tcp-enabled", havingValue = "true", matchIfMissing = true)
 public class ChatServerStarter implements CommandLineRunner {
-    private final ChatProperties chatProperties;
-    private final AuthProvider authProvider;
 
-    public ChatServerStarter(ChatProperties chatProperties, AuthProvider authProvider) {
-        this.chatProperties = chatProperties;
+    private final int port;
+    private final boolean enabled;
+    private final AuthProvider authProvider;
+    private final ChatTlsProperties tlsProperties;
+
+    public ChatServerStarter(
+            @Value("${chat.tcp-port}") int port,
+            @Value("${chat.tcp-enabled}") boolean enabled,
+            AuthProvider authProvider,
+            ChatTlsProperties tlsProperties
+    ) {
+        this.port = port;
+        this.enabled = enabled;
         this.authProvider = authProvider;
+        this.tlsProperties = tlsProperties;
     }
 
     @Override
-    public void run(String... args) throws Exception {
-        startTcpServer();
-    }
+    public void run(String... args) {
+        if (!enabled) {
+            return;
+        }
 
-    /**
-     * Separated method for starting listening tcp server in thread
-     */
-    private void startTcpServer() {
+        ChatTlsConfig tlsConfig = new ChatTlsConfig(
+                tlsProperties.keyStore(),
+                tlsProperties.keyStorePassword() != null
+                        ? tlsProperties.keyStorePassword().toCharArray()
+                        : new char[0],
+                tlsProperties.keyPassword().toCharArray()
+        );
+
+        ChatServer server = new ChatServer(port, authProvider, tlsConfig);
+
         Thread thread = new Thread(() -> {
-            try{
-                ChatServer server = new ChatServer(chatProperties.getTcpPort(), authProvider);
+            try {
                 server.start();
-            }catch(Exception e){
-                CustomLogger.logInfo("Failed to start TCP server. Reason: %s".formatted(e.getMessage()), ChatServer.class.getName());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
-        }, "chat-tcp-server");
-
-        thread.setDaemon(false);
+        });
+        thread.setDaemon(true);
         thread.start();
     }
 }

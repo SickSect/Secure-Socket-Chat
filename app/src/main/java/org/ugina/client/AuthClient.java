@@ -2,19 +2,24 @@ package org.ugina.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import javax.net.ssl.SSLContext;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.util.Map;
 
 public class AuthClient {private final String baseUrl;
     private final HttpClient httpClient;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public AuthClient(String baseUrl) {
+    public AuthClient(String baseUrl) throws Exception {
         this.baseUrl = baseUrl;
-        this.httpClient = HttpClient.newHttpClient();
+        SSLContext ctx = TlsClientContextFactory.createSSLContext(
+                Path.of("certs/client-truststore.p12"),
+                "changeit".toCharArray());
+        this.httpClient = HttpClient.newBuilder().sslContext(ctx).build();
     }
 
     /**

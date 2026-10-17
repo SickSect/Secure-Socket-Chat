@@ -16,7 +16,7 @@ public class ConsoleTui implements ChatEventListener {
     private final AuthClient authClient;
     private final KeyManager keyManager = new KeyManager();
 
-    public ConsoleTui(String serverBaseUrl) {
+    public ConsoleTui(String serverBaseUrl) throws Exception {
         this.authClient = new AuthClient(serverBaseUrl);
     }
 

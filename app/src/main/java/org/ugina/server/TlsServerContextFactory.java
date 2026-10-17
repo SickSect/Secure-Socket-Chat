@@ -10,14 +10,28 @@ import java.security.SecureRandom;
 
 public class TlsServerContextFactory {
 
+    /**
+     * Совместимость: один пароль на keystore и на key (как было).
+     */
     public static SSLContext createSSLContext(Path keystorePath, char[] password) throws Exception {
+        return createSSLContext(keystorePath, password, password);
+    }
+
+    /**
+     * Раздельные пароли: storepass и keypass.
+     */
+    public static SSLContext createSSLContext(
+            Path keystorePath,
+            char[] storePassword,
+            char[] keyPassword
+    ) throws Exception {
         KeyStore keyStore = KeyStore.getInstance("PKCS12");
         try (InputStream in = Files.newInputStream(keystorePath)) {
-            keyStore.load(in, password);
+            keyStore.load(in, storePassword);
         }
 
         KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(keyStore, password);   // приватный ключ сервера + сертификат
+        kmf.init(keyStore, keyPassword);
 
         SSLContext sslContext = SSLContext.getInstance("TLS");
         sslContext.init(kmf.getKeyManagers(), null, new SecureRandom());

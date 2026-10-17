@@ -2,15 +2,19 @@ server:
   port: 8443  # порт встроенного Tomcat для будущих REST endpoints
   ssl:
     enabled: true
-    key-store: ${TLS_KEYSTORE:file:../certs/server-keystore.p12}
+    key-store: ${TLS_KEYSTORE:file:certs/server-keystore.p12}
     key-store-type: PKCS12
     key-store-password:  ${TLS_KEYSTORE_PASSWORD:}
     key-password: ${TLS_KEY_PASSWORD:${TLS_KEYSTORE_PASSWORD:}}
     key-alias: server
     enabled-protocols: TLSv1.2,TLSv1.3
 chat:
-  tcp-port: 5000  # порт нашего TCP-чата
-  tcp-enabled: false # ChatServerStarter не создаётся в тестах
+  tcp-port: ${CHAT_TLS_PORT:5000}  # порт нашего TCP-чата
+  tcp-enabled: true # ChatServerStarter не создаётся в тестах
+  tls:
+    key-store: ${TLS_KEYSTORE:file:certs/server-keystore.p12}
+    key-store-password: ${TLS_KEYSTORE_PASSWORD:}
+    key-password: ${TLS_KEY_PASSWORD:${TLS_KEYSTORE_PASSWORD:}}
 
 auth:
   provider: local

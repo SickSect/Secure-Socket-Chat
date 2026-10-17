@@ -3,6 +3,7 @@ package org.ugina.server;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.juli.logging.Log;
 import org.ugina.auth.AuthProvider;
+import org.ugina.config.ChatTlsConfig;
 import org.ugina.crypto.KeyLoader;
 import org.ugina.utils.CustomLogger;
 
@@ -23,6 +24,7 @@ public class ChatServer {
     private static final SecretKey key;
     private final int port;
     private final AuthProvider authProvider;
+    private final ChatTlsConfig tlsConfig;
 
     static {
         try {
@@ -32,37 +34,43 @@ public class ChatServer {
         }
     }
 
-    public ChatServer(int port, AuthProvider authProvider) {
+    public ChatServer(int port, AuthProvider authProvider, ChatTlsConfig tlsConfig) {
         this.port = port;
         this.authProvider = authProvider;
+        this.tlsConfig = tlsConfig;
     }
 
     public void start() throws Exception {
         CustomLogger.logInfo("Start chat server...", ChatServer.class.getName());
         ExecutorService executor = null;
 
-        Path keystorePath = Path.of("certs/server-keystore.p12");
-        char[] keystorePassword = "changeit".toCharArray();
-
-        SSLContext sslContext = TlsServerContextFactory.createSSLContext(keystorePath, keystorePassword);
+        SSLContext sslContext = TlsServerContextFactory.createSSLContext(
+                tlsConfig.keyStore(),
+                tlsConfig.keyStorePassword()
+        );
         SSLServerSocketFactory factory = sslContext.getServerSocketFactory();
         SSLServerSocket serverSocket = (SSLServerSocket) factory.createServerSocket(port);
         serverSocket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
-        try{
+
+        try {
             executor = Executors.newCachedThreadPool();
             CustomLogger.logInfo("Waiting for client...", ChatServer.class.getName());
             ChatRoom room = new ChatRoom();
-            while(true){
+            while (true) {
                 Socket socket = serverSocket.accept();
-                CustomLogger.logInfo("Client connected! %s".formatted(socket.getRemoteSocketAddress()), ChatServer.class.getName());
+                CustomLogger.logInfo(
+                        "Client connected! %s".formatted(socket.getRemoteSocketAddress()),
+                        ChatServer.class.getName()
+                );
                 ChatHandler handler = new ChatHandler(socket, room, key, authProvider);
                 executor.execute(handler);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {
-            if (executor != null)
+            if (executor != null) {
                 executor.shutdown();
+            }
         }
     }
 }

@@ -63,6 +63,19 @@ dependencies {
     implementation 'com.bucket4j:bucket4j-core:8.10.1'
 }
 
+def envFile = project.file('.env')   // or put .env at the repo root and keep rootProject
+def dotenv = [:]
+if (envFile.exists()) {
+    envFile.eachLine('UTF-8') { raw ->
+        def line = raw.replace('\uFEFF', '').trim()
+        if (line && !line.startsWith('#') && line.contains('=')) {
+            def (k, v) = line.split('=', 2)
+            dotenv[k.trim()] = v.trim()
+        }
+    }
+}
+println ">> .env: ${envFile.absolutePath}, exists=${envFile.exists()}, keys=${dotenv.keySet()}"
+
 // Apply a specific Java toolchain to ease working on different environments.
 java {
     toolchain {
@@ -72,14 +85,17 @@ java {
 
 application {
     mainClass = 'org.ugina.App'
+    dotenv.each { k, v -> environment k, v }
 }
 
 tasks.named('test') {
     // Use TestNG for unit tests.
+    dotenv.each { k, v -> environment k, v }
     useTestNG()
 }
 
 tasks.register('runServer', JavaExec) {
+    dotenv.each { k, v -> environment k, v }
     group = 'application'
     description = 'Run the echo server'
     classpath = sourceSets.main.runtimeClasspath
@@ -88,6 +104,7 @@ tasks.register('runServer', JavaExec) {
 }
 
 tasks.register('runClient', JavaExec) {
+    dotenv.each { k, v -> environment k, v }
     group = 'application'
     description = 'Run the echo client'
     classpath = sourceSets.main.runtimeClasspath
