@@ -44,11 +44,6 @@ public class AuthController {
                 request.publicKey()
         );
 
-        // Пока ничего не делаем, но теперь можем посмотреть что пришло
-        System.out.println("[register] received: username=" + request.username()
-                + ", publicKey length="
-                + (request.publicKey() != null ? request.publicKey().length() : 0));
-
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "status", "registered",
                 "username", principal.username()

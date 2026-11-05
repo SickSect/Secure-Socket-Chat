@@ -3,8 +3,21 @@
 
 # Log file
 *.log
+logs/
+app/logs/
 
+# Local environment / secrets
+.env
 app/.env
+*.tmp
+
+# OpenSSH private keys accidentally present in the working tree
+21062007
+21062007.pub
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
 
 # BlueJ files
 *.ctxt
@@ -21,18 +34,25 @@ app/.env
 *.tar.gz
 *.rar
 
-# TLS / keystores
+# TLS / keystores / certificates
 *.p12
 *.pfx
 *.jks
 *.keystore
 *.key
 *.pem
+*.crt
+*.csr
 
-# Certs folder generally
-app/certs/
+# Certs folder contents (the directory itself stays visible so the
+# non-secret generator scripts and docs below can be tracked)
+certs/*
+app/certs/*
 
-# But allow useful non-secret files if needed
+# But allow the non-secret generator scripts and documentation
+!certs/README.md
+!certs/generate-dev-certs.ps1
+!certs/generate-dev-certs.sh
 !app/certs/.gitkeep
 !app/certs/README.md
 !app/certs/generate-dev-certs.sh

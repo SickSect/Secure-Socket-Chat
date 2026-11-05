@@ -1,10 +1,8 @@
 package org.ugina.config;
 
-import java.nio.file.Path;
-
 public record ChatTlsConfig(
-        Path keyStore,
+        String keyStore,
         char[] keyStorePassword,
-        char [] keyPassword
+        char[] keyPassword
 ) {
 }

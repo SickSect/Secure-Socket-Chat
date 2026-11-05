@@ -1,9 +1,5 @@
 package org.ugina.protocol;
 
-import org.ugina.crypto.RsaCrypto;
-
-import java.security.PublicKey;
-
 public class ClientMessage {
     public CommandType commandType;
     public String username;          // для JOIN
@@ -14,6 +10,7 @@ public class ClientMessage {
     public String nonce;             // для SEND_MESSAGE (Base64)
     public String ephemeralPublicKey;
     public String signature;
+    public String confirmation;
     public String jwt;
 
     public ClientMessage() {
@@ -26,15 +23,15 @@ public class ClientMessage {
                 .build();
     }
 
-    public static ClientMessage quit(){
+    public static ClientMessage quit() {
         return new ClientMessage.Builder().commandType(CommandType.QUIT).build();
     }
 
-    public static ClientMessage getKey(String recipient){
+    public static ClientMessage getKey(String recipient) {
         return new Builder().commandType(CommandType.GET_KEY).toClientName(recipient).build();
     }
 
-    public static ClientMessage message(String recipient, String nonce, String e2ePayload){
+    public static ClientMessage message(String recipient, String nonce, String e2ePayload) {
         return new Builder()
                 .commandType(CommandType.SEND_MESSAGE)
                 .toClientName(recipient)
@@ -53,12 +50,26 @@ public class ClientMessage {
                 .build();
     }
 
-    public static ClientMessage sessionAck(String toName, String ephemeralPubBase64, String signatureBase64) {
+    public static ClientMessage sessionAck(
+            String toName,
+            String ephemeralPubBase64,
+            String signatureBase64,
+            String confirmationBase64
+    ) {
         return new Builder()
                 .commandType(CommandType.SESSION_ACK)
                 .toClientName(toName)
                 .ephemeralPublicKey(ephemeralPubBase64)
                 .signature(signatureBase64)
+                .confirmation(confirmationBase64)
+                .build();
+    }
+
+    public static ClientMessage sessionConfirm(String toName, String confirmationBase64) {
+        return new Builder()
+                .commandType(CommandType.SESSION_CONFIRM)
+                .toClientName(toName)
+                .confirmation(confirmationBase64)
                 .build();
     }
 
@@ -71,10 +82,10 @@ public class ClientMessage {
         this.timestamp = builder.timestamp;
         this.nonce = builder.nonce;
         this.signature = builder.signature;
+        this.confirmation = builder.confirmation;
         this.ephemeralPublicKey = builder.ephemeralPublicKey;
         this.jwt = builder.jwt;
     }
-
 
     public static class Builder {
         public CommandType commandType;
@@ -86,8 +97,8 @@ public class ClientMessage {
         public String nonce;             // для SEND_MESSAGE (Base64)
         public String ephemeralPublicKey;
         public String signature;
+        public String confirmation;
         public String jwt;
-
 
         public ClientMessage build() {
             return new ClientMessage(this);
@@ -138,7 +149,12 @@ public class ClientMessage {
             return this;
         }
 
-        public Builder jwt(String jwt){
+        public Builder confirmation(String confirmation) {
+            this.confirmation = confirmation;
+            return this;
+        }
+
+        public Builder jwt(String jwt) {
             this.jwt = jwt;
             return this;
         }

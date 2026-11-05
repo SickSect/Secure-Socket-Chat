@@ -63,18 +63,20 @@ dependencies {
     implementation 'com.bucket4j:bucket4j-core:8.10.1'
 }
 
-def envFile = project.file('.env')   // or put .env at the repo root and keep rootProject
 def dotenv = [:]
-if (envFile.exists()) {
-    envFile.eachLine('UTF-8') { raw ->
-        def line = raw.replace('\uFEFF', '').trim()
-        if (line && !line.startsWith('#') && line.contains('=')) {
-            def (k, v) = line.split('=', 2)
-            dotenv[k.trim()] = v.trim()
+def envFiles = [rootProject.file('.env'), project.file('.env')]
+envFiles.each { envFile ->
+    if (envFile.exists()) {
+        envFile.eachLine('UTF-8') { raw ->
+            def line = raw.replace('\uFEFF', '').trim()
+            if (line && !line.startsWith('#') && line.contains('=')) {
+                def (k, v) = line.split('=', 2)
+                dotenv[k.trim()] = v.trim()
+            }
         }
+        println ">> loaded environment file: ${envFile.absolutePath}"
     }
 }
-println ">> .env: ${envFile.absolutePath}, exists=${envFile.exists()}, keys=${dotenv.keySet()}"
 
 // Apply a specific Java toolchain to ease working on different environments.
 java {
@@ -83,8 +85,10 @@ java {
     }
 }
 
-application {
-    mainClass = 'org.ugina.App'
+tasks.withType(JavaExec).configureEach {
+    // Run from the repository root so relative paths to .env, certs/ and logs/
+    // resolve the same way for bootRun, runServer and runClient.
+    workingDir = rootProject.projectDir
     dotenv.each { k, v -> environment k, v }
 }
 
@@ -99,7 +103,7 @@ tasks.register('runServer', JavaExec) {
     group = 'application'
     description = 'Run the echo server'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'org.ugina.server.ChatServer'
+    mainClass = 'org.ugina.App'
     standardInput = System.in
 }
 

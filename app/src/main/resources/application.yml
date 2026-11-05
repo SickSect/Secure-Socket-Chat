@@ -1,16 +1,23 @@
 server:
-  port: 8443  # порт встроенного Tomcat для будущих REST endpoints
+  port: ${SERVER_PORT:8443}
   ssl:
     enabled: true
     key-store: ${TLS_KEYSTORE:file:certs/server-keystore.p12}
     key-store-type: PKCS12
-    key-store-password:  ${TLS_KEYSTORE_PASSWORD:}
+    key-store-password: ${TLS_KEYSTORE_PASSWORD:}
     key-password: ${TLS_KEY_PASSWORD:${TLS_KEYSTORE_PASSWORD:}}
-    key-alias: server
-    enabled-protocols: TLSv1.2,TLSv1.3
+    key-alias: ${TLS_KEY_ALIAS:server}
+    enabled-protocols: TLSv1.3
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-exception: false
+    whitelabel:
+      enabled: false
+
 chat:
-  tcp-port: ${CHAT_TLS_PORT:5000}  # порт нашего TCP-чата
-  tcp-enabled: true # ChatServerStarter не создаётся в тестах
+  tcp-port: ${CHAT_TLS_PORT:5000}
+  tcp-enabled: ${CHAT_TCP_ENABLED:true}
   tls:
     key-store: ${TLS_KEYSTORE:file:certs/server-keystore.p12}
     key-store-password: ${TLS_KEYSTORE_PASSWORD:}
@@ -19,30 +26,30 @@ chat:
 auth:
   provider: local
   jwt:
-    secret: ${JWT_SECRET:change-me-in-production-this-must-be-at-least-256-bits-long}
-    expiration-minutes: 60
+    # Leave empty to let JwtService generate a random per-process secret.
+    # Set JWT_SECRET to at least 32 random bytes in production.
+    secret: ${JWT_SECRET:}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
 
 spring:
   autoconfigure:
     exclude:
-      #- org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-      #- org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
-      #- org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
       - org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
       - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   datasource:
-    url: jdbc:postgresql://localhost:5432/secure_chat
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/secure_chat}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # Flyway owns the schema. Never let Hibernate drop user data on restart.
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-    show-sql: true
-
+    show-sql: false
+    open-in-view: false
   flyway:
     enabled: true
     locations: classpath:db/migration

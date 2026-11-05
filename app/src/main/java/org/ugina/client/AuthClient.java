@@ -1,5 +1,6 @@
 package org.ugina.client;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.net.ssl.SSLContext;
@@ -7,25 +8,33 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 
-public class AuthClient {private final String baseUrl;
+public class AuthClient {
+
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
+
+    private final String baseUrl;
     private final HttpClient httpClient;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     public AuthClient(String baseUrl) throws Exception {
-        this.baseUrl = baseUrl;
-        SSLContext ctx = TlsClientContextFactory.createSSLContext(
-                Path.of("certs/client-truststore.p12"),
-                "changeit".toCharArray());
-        this.httpClient = HttpClient.newBuilder().sslContext(ctx).build();
+        this.baseUrl = stripTrailingSlash(baseUrl);
+        SSLContext ctx = TlsClientContextFactory.createDefaultContext();
+        this.httpClient = HttpClient.newBuilder()
+                .sslContext(ctx)
+                .connectTimeout(CONNECT_TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
     }
 
     /**
-     * Регистрирует нового пользователя.
+     * Registers a new user.
      *
-     * @return true если регистрация успешна (201)
+     * @return null on success, otherwise a human-readable error
      */
     public String register(String username, String password, String publicKeyBase64)
             throws Exception {
@@ -37,6 +46,7 @@ public class AuthClient {private final String baseUrl;
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/auth/register"))
+                .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -47,14 +57,11 @@ public class AuthClient {private final String baseUrl;
         if (response.statusCode() == 201) {
             return null;
         }
-        // вернём тело целиком чтобы увидеть причину
         return "HTTP " + response.statusCode() + ": " + response.body();
     }
 
     /**
-     * Логинится, возвращает JWT.
-     *
-     * @return JWT-строка или null если логин не удался
+     * Logs in and returns a JWT, or null if authentication failed.
      */
     public String login(String username, String password) throws Exception {
         String body = mapper.writeValueAsString(Map.of(
@@ -64,6 +71,7 @@ public class AuthClient {private final String baseUrl;
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/auth/login"))
+                .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -75,8 +83,16 @@ public class AuthClient {private final String baseUrl;
             return null;
         }
 
-        Map<String, Object> parsed = mapper.readValue(response.body(), Map.class);
-        return (String) parsed.get("token");
+        Map<?, ?> parsed = mapper.readValue(response.body(), Map.class);
+        Object token = parsed.get("token");
+        return token instanceof String value ? value : null;
     }
 
+    private static String stripTrailingSlash(String value) {
+        String result = value == null || value.isBlank() ? "https://localhost:8443" : value.trim();
+        while (result.endsWith("/")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
+    }
 }

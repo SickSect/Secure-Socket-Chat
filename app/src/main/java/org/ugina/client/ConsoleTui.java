@@ -3,10 +3,13 @@ package org.ugina.client;
 import org.ugina.crypto.RsaCrypto;
 
 import java.io.BufferedReader;
+import java.io.Console;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.security.KeyPair;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 
 public class ConsoleTui implements ChatEventListener {
 
@@ -33,16 +36,19 @@ public class ConsoleTui implements ChatEventListener {
             String choice = stdin.readLine();
 
             if ("1".equals(choice)) {
-                handleRegister(stdin);
+                if (!handleRegister(stdin)) {
+                    System.out.println("Registration did not complete; nothing was saved.");
+                    return;
+                }
                 System.out.println("Now login with your credentials.");
             }
 
             LoginResult login = handleLogin(stdin);
             if (login == null) {
-                return;  // логин не удался, сообщение уже выведено
+                return;
             }
 
-            boolean joined = core.connect(login.jwt(), login.keyPair());
+            boolean joined = core.connect(login.username(), login.jwt(), login.keyPair());
             if (!joined) {
                 System.out.println("Could not join chat — token rejected or server unreachable");
                 return;
@@ -54,61 +60,88 @@ public class ConsoleTui implements ChatEventListener {
         }
     }
 
-    private void handleRegister(BufferedReader stdin) throws Exception {
+    private boolean handleRegister(BufferedReader stdin) throws Exception {
         System.out.print("Choose username: ");
         String username = stdin.readLine();
-        System.out.print("Choose password: ");
-        String password = stdin.readLine();
-
-        if (username == null || username.isBlank() || password == null || password.isBlank()) {
-            System.out.println("Username and password required");
-            return;
+        if (username == null || username.isBlank()) {
+            System.out.println("Username required");
+            return false;
         }
 
+        char[] passwordChars = readPassword(stdin, "Choose password: ");
         try {
-            // создаём и сохраняем ключи локально
-            KeyPair keyPair = keyManager.createAndStore(username, password.toCharArray());
+            if (passwordChars.length == 0) {
+                System.out.println("Password required");
+                return false;
+            }
+
+            KeyPair keyPair = keyManager.createAndStore(username, passwordChars);
             String publicKeyBase64 = RsaCrypto.publicKeyToBase64(keyPair.getPublic());
 
-            // регистрируем на сервере
-            String error = authClient.register(username, password, publicKeyBase64);
+            String error = authClient.register(
+                    username, new String(passwordChars), publicKeyBase64);
             if (error == null) {
                 System.out.println("Registered successfully!");
-            } else {
-                System.out.println("Registration failed: " + error);
+                return true;
             }
+
+            // The server rejected the registration: do not leave an orphaned
+            // private key on this device.
+            keyManager.delete(username);
+            System.out.println("Registration failed: " + error);
+            return false;
         } catch (IllegalStateException e) {
             System.out.println(e.getMessage());
+            return false;
+        } finally {
+            Arrays.fill(passwordChars, '\0');
         }
     }
 
     private LoginResult handleLogin(BufferedReader stdin) throws Exception {
         System.out.print("Username: ");
         String username = stdin.readLine();
-        System.out.print("Password: ");
-        String password = stdin.readLine();
-
-        if (username == null || username.isBlank() || password == null || password.isBlank()) {
-            System.out.println("Username and password required");
+        if (username == null || username.isBlank()) {
+            System.out.println("Username required");
             return null;
         }
 
-        String jwt = authClient.login(username, password);
-        if (jwt == null) {
-            System.out.println("Login failed — invalid credentials");
-            return null;
-        }
-
-        char[] passwordChars = password.toCharArray();
-        KeyPair keyPair;
+        char[] passwordChars = readPassword(stdin, "Password: ");
         try {
-            keyPair = keyManager.load(username, passwordChars);
-        } finally {
-            java.util.Arrays.fill(passwordChars, '\0');  // затираем пароль сразу после использования
-        }
+            if (passwordChars.length == 0) {
+                System.out.println("Password required");
+                return null;
+            }
 
-        System.out.println("Logged in successfully!");
-        return new LoginResult(jwt, username, keyPair);
+            String jwt = authClient.login(username, new String(passwordChars));
+            if (jwt == null) {
+                System.out.println("Login failed — invalid credentials");
+                return null;
+            }
+
+            KeyPair keyPair = keyManager.load(username, passwordChars);
+            System.out.println("Logged in successfully!");
+            return new LoginResult(jwt, username, keyPair);
+        } finally {
+            Arrays.fill(passwordChars, '\0');
+        }
+    }
+
+    /**
+     * Prefers a real no-echo console. Falls back to a visible line only when
+     * the process is not attached to a terminal (for example in an IDE).
+     */
+    private static char[] readPassword(BufferedReader stdin, String prompt) throws IOException {
+        Console console = System.console();
+        System.out.print(prompt);
+        if (console != null) {
+            char[] password = console.readPassword();
+            return password == null ? new char[0] : password;
+        }
+        System.out.println();
+        System.out.println("(warning: no interactive console; password will be visible)");
+        String line = stdin.readLine();
+        return line == null ? new char[0] : line.toCharArray();
     }
 
     private void runChatLoop(BufferedReader stdin) throws Exception {
@@ -151,7 +184,7 @@ public class ConsoleTui implements ChatEventListener {
     private void printWelcome() {
         System.out.println();
         System.out.println("─────────────────────────────────────────");
-        System.out.println("  Secure Chat v0.5");
+        System.out.println("  Secure Chat v0.6");
         System.out.println("─────────────────────────────────────────");
         System.out.println("  @<user> <text>   send a message");
         System.out.println("  /help            show this help");

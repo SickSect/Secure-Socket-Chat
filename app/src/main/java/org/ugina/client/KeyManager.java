@@ -3,25 +3,37 @@ package org.ugina.client;
 import org.ugina.crypto.RsaCrypto;
 import org.ugina.crypto.keyStorage.FileBasedKeyStorage;
 import org.ugina.crypto.keyStorage.KeyStorage;
+import org.ugina.utils.UsernamePolicy;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 
 public class KeyManager {
-    private KeyStorage storageFor(String username) {
-        Path keyFile = Path.of(
+
+    /**
+     * The username becomes part of a filesystem path, so it must be validated
+     * before use. This also rejects {@code ..} path traversal attempts.
+     */
+    private Path pathFor(String username) {
+        if (!UsernamePolicy.isValid(username)) {
+            throw new IllegalArgumentException("Invalid username");
+        }
+        return Path.of(
                 System.getProperty("user.home"),
                 ".secure-chat",
                 username + ".key"
         );
-        return new FileBasedKeyStorage(keyFile);
+    }
+
+    private KeyStorage storageFor(String username) {
+        return new FileBasedKeyStorage(pathFor(username));
     }
 
     /**
-     * Создаёт новую RSA-пару и сохраняет её локально.
-     * Используется при регистрации.
+     * Creates a new RSA pair and stores it locally. Used during registration.
      *
-     * @throws IllegalStateException если ключи уже существуют
+     * @throws IllegalStateException if keys already exist for this username
      */
     public KeyPair createAndStore(String username, char[] password) throws Exception {
         KeyStorage storage = storageFor(username);
@@ -35,10 +47,9 @@ public class KeyManager {
     }
 
     /**
-     * Загружает существующую RSA-пару.
-     * Используется при логине.
+     * Loads the existing RSA pair. Used during login.
      *
-     * @throws IllegalStateException если ключей нет на устройстве
+     * @throws IllegalStateException if no keys exist on this device
      */
     public KeyPair load(String username, char[] password) throws Exception {
         KeyStorage storage = storageFor(username);
@@ -47,5 +58,17 @@ public class KeyManager {
                     "No keys for '" + username + "' on this device. Register first.");
         }
         return storage.load(password);
+    }
+
+    /**
+     * Removes a local key file, for example when the server rejected the
+     * registration after the key had already been written.
+     */
+    public void delete(String username) {
+        try {
+            Files.deleteIfExists(pathFor(username));
+        } catch (Exception ignored) {
+            // best effort: the key is unusable anyway if registration failed
+        }
     }
 }

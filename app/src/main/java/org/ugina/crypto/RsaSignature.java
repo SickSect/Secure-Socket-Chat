@@ -2,7 +2,6 @@ package org.ugina.crypto;
 
 import org.ugina.crypto.exception.CryptoException;
 
-import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
@@ -11,27 +10,19 @@ public class RsaSignature {
     private static final String ALGORITHM = "SHA256withRSA";
 
     public static byte[] sign(byte[] data, PrivateKey privateKey) throws CryptoException {
-        Signature signature = null;
         try {
-            signature = Signature.getInstance(ALGORITHM);
+            Signature signature = Signature.getInstance(ALGORITHM);
             signature.initSign(privateKey);
             signature.update(data);
             return signature.sign();
         } catch (Exception e) {
-            // ВРЕМЕННО для отладки:
-            System.err.println("[RsaSignature.sign] EXCEPTION: "
-                    + e.getClass().getSimpleName() + ": " + e.getMessage());
-            System.err.println("[RsaSignature.sign] privateKey type: "
-                    + (privateKey == null ? "NULL" : privateKey.getAlgorithm()));
-            System.err.println("[RsaSignature.sign] data length: "
-                    + (data == null ? "NULL" : data.length));
-            e.printStackTrace();
             throw new CryptoException("[RsaSignature][sign] failed", e);
         }
     }
 
-    public static boolean verify(byte[] data, byte[] signature, PublicKey publicKey) throws CryptoException {
-        try{
+    public static boolean verify(byte[] data, byte[] signature, PublicKey publicKey)
+            throws CryptoException {
+        try {
             Signature verifier = Signature.getInstance(ALGORITHM);
             verifier.initVerify(publicKey);
             verifier.update(data);

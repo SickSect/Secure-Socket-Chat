@@ -1,4 +1,4 @@
-package org.ugina.client;
+package org.ugina.crypto;
 
 import javax.crypto.SecretKey;
 import javax.security.auth.Destroyable;
@@ -68,10 +68,10 @@ public final class DestroyableSecretKey implements SecretKey, Destroyable {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (this.destroyed) return false;              // ← уничтоженный ключ ничему не равен
+        if (this.destroyed) return false;              // уничтоженный ключ ничему не равен
         if (!(o instanceof SecretKey)) return false;
         SecretKey other = (SecretKey) o;
-        if (other instanceof DestroyableSecretKey d && d.destroyed) return false;  // ← и наоборот
+        if (other instanceof DestroyableSecretKey d && d.destroyed) return false;  // и наоборот
         if (!algorithm.equalsIgnoreCase(other.getAlgorithm())) return false;
         return MessageDigest.isEqual(this.getEncoded(), other.getEncoded());
     }

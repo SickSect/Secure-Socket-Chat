@@ -1,139 +1,149 @@
 package org.ugina.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ugina.crypto.*;
+import org.ugina.crypto.EcdhCrypto;
+import org.ugina.crypto.RsaCrypto;
+import org.ugina.crypto.RsaSignature;
+import org.ugina.crypto.SessionCrypto;
 import org.ugina.crypto.exception.CryptoException;
-import org.ugina.crypto.keyStorage.FileBasedKeyStorage;
-import org.ugina.crypto.keyStorage.KeyStorage;
 import org.ugina.protocol.ClientMessage;
 import org.ugina.protocol.ErrorCode;
 import org.ugina.protocol.ServerMessage;
+import org.ugina.utils.FrameReader;
 
 import javax.crypto.SecretKey;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.net.Socket;
-import java.nio.file.Path;
-import java.security.*;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Base64;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class ChatClientCore {
-    ChatEventListener listener;
+    private static final int MAX_FRAME_CHARS = 96 * 1024;
+    private static final int MAX_MESSAGE_CHARS = 32 * 1024;
+    private static final int HANDSHAKE_TIMEOUT_SECONDS = 10;
+    private static final int HANDSHAKE_THREADS = 4;
 
-    private final String HOST;
-    private final int PORT;
-    private final SecretKey PSK_KEY;
-    private SSLSocket sslSocket;
+    private final ChatEventListener listener;
+    private final String host;
+    private final int port;
 
-    private static final ObjectMapper mapper = new ObjectMapper();
-    private static final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, CompletableFuture<PublicKey>> pendingKeyRequests = new ConcurrentHashMap<>();
+    private final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private final ConcurrentHashMap<String, PublicKey> keyCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CompletableFuture<PublicKey>> pendingKeyRequests =
+            new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, SessionContext> sessions = new ConcurrentHashMap<>();
-    private CompletableFuture<Boolean> joinResult;
 
-    private PrivateKey privateKey;
+    private final Object sessionLock = new Object();
+    private final SecureRandom random = new SecureRandom();
+    private final ExecutorService handshakeExecutor = Executors.newFixedThreadPool(
+            HANDSHAKE_THREADS, runnable -> {
+                Thread thread = new Thread(runnable, "handshake-worker");
+                thread.setDaemon(true);
+                return thread;
+            });
 
+    private SSLSocket sslSocket;
     private BufferedReader in;
     private PrintWriter out;
+    private CompletableFuture<Boolean> joinResult;
+
+    private String ownName;
+    private PrivateKey privateKey;
 
     private volatile boolean connected = true;
     private volatile boolean sessionsDestroyed = false;
 
-    public ChatClientCore(
-            ChatEventListener listener,
-            String host,
-            int port) throws GeneralSecurityException {
+    public ChatClientCore(ChatEventListener listener, String host, int port) {
         this.listener = listener;
-        HOST = host;
-        PORT = port;
-        PSK_KEY = KeyLoader.getSecretKey();
+        this.host = host;
+        this.port = port;
     }
 
     /**
-     * Подключается к серверу с готовым JWT и ключевой парой.
+     * Connects to the server with a JWT and the user's identity key pair.
      *
-     * @param jwt     токен полученный через REST-логин
-     * @param keyPair RSA-пара пользователя (приватный нужен для handshake)
-     * @return true если JOIN успешен
+     * @param username name that will be used in the E2E transcript (must match
+     *                 the JWT subject)
+     * @param jwt      token obtained through REST login
+     * @param keyPair  RSA identity key pair
+     * @return true if JOIN succeeded
      */
-    public boolean connect(String jwt, KeyPair keyPair) throws Exception {
+    public boolean connect(String username, String jwt, KeyPair keyPair) throws Exception {
+        if (username == null || username.isBlank() || jwt == null || keyPair == null) {
+            throw new IllegalArgumentException("username, jwt and keyPair are required");
+        }
+        this.ownName = username;
         this.privateKey = keyPair.getPrivate();
-        // TODO часть вынести в кфг,а другую часть - нужно убрать в секретное хранилище данных!
-        Path trustedstorePath = Path.of("certs/client-truststore.p12");
-        char[] trustedPassword = "changeit".toCharArray();
+        this.sessionsDestroyed = false;
 
-        SSLContext sslContext = TlsClientContextFactory.createSSLContext(trustedstorePath, trustedPassword);
-        SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
-        System.out.println("Connecting to " + HOST + ":" + PORT + " via TLS...");
+        SSLContext sslContext = TlsClientContextFactory.createDefaultContext();
+        System.out.println("Connecting to " + host + ":" + port + " via TLS...");
         try {
-            sslSocket = (SSLSocket) sslSocketFactory.createSocket(HOST, PORT);
-            sslSocket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"}); //SETUP PROTOCOLS PARAMS
+            sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket(host, port);
             SSLParameters sslParameters = sslSocket.getSSLParameters();
+            sslParameters.setProtocols(new String[]{"TLSv1.3"});
             sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
             sslSocket.setSSLParameters(sslParameters);
-            sslSocket.startHandshake(); // MAKE A HANDSHAKE
-            System.out.println("TLS Handshake successful! Protocol: " + sslSocket.getSession().getProtocol());
-            System.out.println("Cipher Suite: " + sslSocket.getSession().getCipherSuite());
-
             sslSocket.setKeepAlive(true);
-            in = new BufferedReader(new InputStreamReader(sslSocket.getInputStream()));
-            out = new PrintWriter(sslSocket.getOutputStream(), true);
+            sslSocket.setTcpNoDelay(true);
+            sslSocket.startHandshake();
 
+            System.out.println("TLS handshake successful. Protocol: "
+                    + sslSocket.getSession().getProtocol()
+                    + ", cipher: " + sslSocket.getSession().getCipherSuite());
+
+            in = new BufferedReader(new InputStreamReader(
+                    sslSocket.getInputStream(), StandardCharsets.UTF_8));
+            out = new PrintWriter(new OutputStreamWriter(
+                    sslSocket.getOutputStream(), StandardCharsets.UTF_8), true);
         } catch (Exception e) {
-            System.err.println("[ERROR] Could not connect to server!");
-            throw new RuntimeException("[ERROR] Could not connect to server!");
+            closeSocketQuietly();
+            throw new IllegalStateException("Could not connect to " + host + ":" + port
+                    + " over TLS: " + e.getMessage(), e);
         }
+
         joinResult = new CompletableFuture<>();
         connected = true;
         startReaderThread();
         sendRaw(ClientMessage.join(jwt));
         try {
-            return joinResult.get(10, TimeUnit.SECONDS);
+            return joinResult.get(HANDSHAKE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
+            disconnect();
             return false;
         }
     }
 
     public void disconnect() {
         try {
-            if (out != null)
+            if (out != null && connected) {
                 sendRaw(ClientMessage.quit());
-            if (sslSocket != null)
-                sslSocket.close();
-        } catch (Exception e) {
-            System.err.println("[ERROR] Error while trying to disconnect from server!");
-        } finally {
-            destroyAllSessions();   // ← затираем ключи при выходе
-            connected = false;
-        }
-    }
-
-    /**
-     * Затирает и удаляет все активные сессии.
-     * Идемпотентно — повторный вызов безопасен (guard-флаг).
-     * Вызывается при отключении от сервера или штатном выходе.
-     */
-    private synchronized void destroyAllSessions() {
-        if (sessionsDestroyed) {
-            return;   // уже затёрли — выходим
-        }
-        sessionsDestroyed = true;
-
-        for (SessionContext session : sessions.values()) {
-            try {
-                session.destroy();
-            } catch (Exception e) {
-                // best effort — продолжаем чистить остальные
             }
+        } catch (Exception ignored) {
+            // best effort
+        } finally {
+            connected = false;
+            closeSocketQuietly();
+            destroyAllSessions();
         }
-        sessions.clear();
     }
 
     public void sendMessage(String recipient, String text) throws Exception {
@@ -141,38 +151,39 @@ public class ChatClientCore {
             listener.onError("DISCONNECTED", "Not connected to server");
             return;
         }
-        SessionContext session;
-        try {
-            session = getOrEstablishSession(recipient);
-        } catch (Exception e) {
-            listener.onError("SESSION_FAILED", "Could not establish session with " + recipient + ": " + e.getMessage());
+        if (text == null || text.length() > MAX_MESSAGE_CHARS) {
+            listener.onError(ErrorCode.INVALID_FORMAT.name(),
+                    "Message is empty or exceeds " + MAX_MESSAGE_CHARS + " characters");
             return;
         }
-        String e2ePayload = AesCrypto.encrypt(text, session.getSessionKey());
+
+        SessionContext session = getOrEstablishSession(recipient);
+        long sequence = session.nextSendSequence();
+        String e2ePayload = SessionCrypto.encrypt(
+                text, session.getSendKey(), ownName, recipient, sequence);
+
         byte[] nonceBytes = new byte[16];
-        new SecureRandom().nextBytes(nonceBytes);
+        random.nextBytes(nonceBytes);
         String nonce = Base64.getEncoder().encodeToString(nonceBytes);
-        ClientMessage msg = ClientMessage.message(recipient, nonce, e2ePayload);
-        sendRaw(msg);
+
+        sendRaw(ClientMessage.message(recipient, nonce, e2ePayload));
     }
 
-    /**
-     * Create thread that reads server responses
-     */
     private void startReaderThread() {
         Thread thread = new Thread(() -> {
             try {
                 String line;
-                while ((line = in.readLine()) != null) {
-                    String decoded = AesCrypto.decrypt(line, PSK_KEY);
-                    ServerMessage msg = mapper.readValue(decoded, ServerMessage.class);
+                while ((line = FrameReader.readLine(in, MAX_FRAME_CHARS)) != null) {
+                    ServerMessage msg = mapper.readValue(line, ServerMessage.class);
                     handleIncoming(msg);
                 }
-                connected = false;
-                destroyAllSessions();
-                listener.onConnectionLost();
             } catch (Exception ex) {
+                if (connected) {
+                    System.err.println("[client] connection error: " + ex.getMessage());
+                }
+            } finally {
                 connected = false;
+                closeSocketQuietly();
                 destroyAllSessions();
                 listener.onConnectionLost();
             }
@@ -181,159 +192,324 @@ public class ChatClientCore {
         thread.start();
     }
 
-    private void instantiateHandshake(String peerName) throws CryptoException, JsonProcessingException {
-        PublicKey peerPublicKey = keyCache.get(peerName);
-        if (peerPublicKey == null) {
-            CompletableFuture<PublicKey> future = new CompletableFuture<>();
-            pendingKeyRequests.put(peerName, future);
-            try {
-                sendRaw(ClientMessage.getKey(peerName));
-                peerPublicKey = future.get(10, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                pendingKeyRequests.remove(peerName);
-                throw new RuntimeException("Cannot get RSA key for " + peerName);
-            }
-        }
-        KeyPair ephemeralKeyPair;
-        try {
-            ephemeralKeyPair = EcdhCrypto.generateKeyPair();
-        } catch (CryptoException e) {
-            throw new CryptoException("Can not generate ephemeral key pair!", e);
-        }
-        String ephPubBase64 = EcdhCrypto.publicKeyToBase64(ephemeralKeyPair.getPublic());
+    private void instantiateHandshake(String peerName) throws Exception {
+        PublicKey peerPublicKey = requestPublicKey(peerName);
+
+        KeyPair ephemeralKeyPair = EcdhCrypto.generateKeyPair();
         byte[] ephemeralPubBytes = ephemeralKeyPair.getPublic().getEncoded();
-        byte[] signature = RsaSignature.sign(ephemeralPubBytes, this.privateKey);
-        String signatureBase64 = Base64.getEncoder().encodeToString(signature);
-        SessionContext context = new SessionContext(peerName, ephemeralKeyPair);
+        byte[] toSign = SessionCrypto.signingPayload("init", ownName, peerName, ephemeralPubBytes);
+        byte[] signature = RsaSignature.sign(toSign, privateKey);
+
+        SessionContext context = new SessionContext(
+                ownName, peerName, ephemeralKeyPair, SessionContext.Role.INITIATOR);
         sessions.put(peerName, context);
-        sendRaw(ClientMessage.initSession(peerName, ephPubBase64, signatureBase64));
+
+        sendRaw(ClientMessage.initSession(
+                peerName,
+                EcdhCrypto.publicKeyToBase64(ephemeralKeyPair.getPublic()),
+                Base64.getEncoder().encodeToString(signature)));
     }
 
     public void handleInitSession(ServerMessage msg) {
-        new Thread(() -> handleInitSessionAsync(msg), "handshake-handler").start();
-    }
-
-    private void handleInitSessionAsync(ServerMessage msg) {
         try {
-            String peerName = msg.fromClientName;
-            PublicKey peerRsaPublicKey = keyCache.get(peerName);
-            if (peerRsaPublicKey == null) {
-                CompletableFuture<PublicKey> future = new CompletableFuture<>();
-                pendingKeyRequests.put(peerName, future);
-                sendRaw(ClientMessage.getKey(peerName));
-                peerRsaPublicKey = future.get(10, TimeUnit.SECONDS);
-            }
-            PublicKey peerEphemeralPub = EcdhCrypto.publicKeyFromBase64(msg.ephemeralPublicKey);
-            byte[] peerEphemeralBytes = peerEphemeralPub.getEncoded();
-            byte[] signature = Base64.getDecoder().decode(msg.signature);
-
-            if (!RsaSignature.verify(peerEphemeralBytes, signature, peerRsaPublicKey)) {
-                listener.onError("BAD_SIGNATURE", "Invalid signature in INIT_SESSION from " + peerName);
-                return;
-            }
-            KeyPair ownEphemeralKeyPair = EcdhCrypto.generateKeyPair();
-            byte[] sharedSecret = EcdhCrypto.computeSharedSecret(ownEphemeralKeyPair.getPrivate(), peerEphemeralPub);
-            byte[] sessionKeyBytes = HkdfCrypto.derive(sharedSecret, null, "secure-chat-session", 32);
-
-            SessionContext context = new SessionContext(peerName, ownEphemeralKeyPair);
-            sessions.put(peerName, context);
-            context.completeHandshake(sessionKeyBytes);
-
-            byte[] myEphemeralPubBytes = ownEphemeralKeyPair.getPublic().getEncoded();
-            byte[] mySignature = RsaSignature.sign(myEphemeralPubBytes, privateKey);
-            String myEphemeralPubBase64 = EcdhCrypto.publicKeyToBase64(ownEphemeralKeyPair.getPublic());
-            String mySignatureBase64 = Base64.getEncoder().encodeToString(mySignature);
-
-            // 8. Отправляем SESSION_ACK
-            sendRaw(ClientMessage.sessionAck(peerName, myEphemeralPubBase64, mySignatureBase64));
-
-            listener.onSystem("Session established with " + peerName);
+            handshakeExecutor.execute(() -> handleInitSessionAsync(msg));
         } catch (Exception e) {
-            listener.onError("HANDSHAKE_FAILED", "Failed to handle INIT_SESSION: " + e.getMessage());
+            listener.onError("HANDSHAKE_FAILED", "Client is shutting down");
         }
     }
 
-    private void handleSessionAck(ServerMessage msg) {
+    private void handleInitSessionAsync(ServerMessage msg) {
+        byte[] sharedSecret = null;
         try {
             String peerName = msg.fromClientName;
+            if (peerName == null || msg.ephemeralPublicKey == null || msg.signature == null) {
+                throw new CryptoException("Malformed INIT_SESSION", null);
+            }
 
-            // 1. Достаём ожидающую сессию
+            PublicKey peerRsaPublicKey = requestPublicKey(peerName);
+            PublicKey peerEphemeralPub = EcdhCrypto.publicKeyFromBase64(msg.ephemeralPublicKey);
+            byte[] peerEphemeralBytes = peerEphemeralPub.getEncoded();
+            byte[] toVerify = SessionCrypto.signingPayload(
+                    "init", peerName, ownName, peerEphemeralBytes);
+            byte[] signature = Base64.getDecoder().decode(msg.signature);
+
+            if (!RsaSignature.verify(toVerify, signature, peerRsaPublicKey)) {
+                listener.onError("BAD_SIGNATURE", "Invalid signature in INIT_SESSION from " + peerName);
+                return;
+            }
+
+            KeyPair ownEphemeralKeyPair = EcdhCrypto.generateKeyPair();
+            byte[] ownEphemeralBytes = ownEphemeralKeyPair.getPublic().getEncoded();
+            sharedSecret = EcdhCrypto.computeSharedSecret(
+                    ownEphemeralKeyPair.getPrivate(), peerEphemeralPub);
+
+            SessionCrypto.DerivedKeys keys = SessionCrypto.derive(
+                    sharedSecret, peerName, ownName, peerEphemeralBytes, ownEphemeralBytes);
+
+            byte[] toSign = SessionCrypto.signingPayload(
+                    "ack", ownName, peerName, ownEphemeralBytes);
+            byte[] mySignature = RsaSignature.sign(toSign, privateKey);
+
+            SessionContext context = new SessionContext(
+                    ownName, peerName, ownEphemeralKeyPair, SessionContext.Role.RESPONDER);
+            byte[] confirmation = context.completeAsResponder(keys);
+
+            synchronized (sessionLock) {
+                // Re-check and install atomically: the peer may have started
+                // its own handshake while we were doing the ECDH work.
+                if (!shouldAcceptIncomingHandshake(peerName)) {
+                    context.destroy();
+                    return;
+                }
+                if (sessions.putIfAbsent(peerName, context) != null) {
+                    // A racing handshake finished first; keep the established
+                    // session instead of replacing it.
+                    context.destroy();
+                    return;
+                }
+            }
+
+            sendRaw(ClientMessage.sessionAck(
+                    peerName,
+                    Base64.getEncoder().encodeToString(ownEphemeralBytes),
+                    Base64.getEncoder().encodeToString(mySignature),
+                    Base64.getEncoder().encodeToString(confirmation)));
+
+            listener.onSystem("Handshake response sent to " + peerName
+                    + ", waiting for key confirmation");
+        } catch (Exception e) {
+            listener.onError("HANDSHAKE_FAILED",
+                    "Failed to handle INIT_SESSION: " + e.getMessage());
+        } finally {
+            wipe(sharedSecret);
+        }
+    }
+
+    /**
+     * Handles the case where both peers start a handshake at the same time.
+     * The lexicographically smaller username keeps its initiator role; the
+     * other side abandons its own attempt and answers as responder. Without
+     * this rule the two contexts would overwrite each other.
+     */
+    private boolean shouldAcceptIncomingHandshake(String peerName) {
+        SessionContext existing = sessions.get(peerName);
+        if (existing == null || existing.getState() == SessionContext.State.FAILED) {
+            return true;
+        }
+        // A stale context must never block a fresh handshake forever.
+        if (existing.isExpired()) {
+            existing.destroy();
+            sessions.remove(peerName, existing);
+            return true;
+        }
+        if (existing.isReady()) {
+            return false;
+        }
+        if (existing.getState() == SessionContext.State.WAITING_FOR_ACK) {
+            if (ownName.compareTo(peerName) < 0) {
+                return false;
+            }
+            existing.destroy();
+            sessions.remove(peerName, existing);
+            return true;
+        }
+        // Already waiting for the initiator's confirmation as responder.
+        return false;
+    }
+
+    private void handleSessionAck(ServerMessage msg) {
+        byte[] sharedSecret = null;
+        try {
+            String peerName = msg.fromClientName;
             SessionContext context = sessions.get(peerName);
             if (context == null || context.getState() != SessionContext.State.WAITING_FOR_ACK) {
                 listener.onError("UNEXPECTED_ACK", "SESSION_ACK without pending session from " + peerName);
                 return;
             }
-
-            // 2. Достаём RSA-public собеседника
-            PublicKey peerRsaPublic = keyCache.get(peerName);
-            if (peerRsaPublic == null) {
-                context.failHandshake("No RSA key for verification");
+            if (msg.confirmation == null || msg.ephemeralPublicKey == null || msg.signature == null) {
+                context.failHandshake("Malformed SESSION_ACK");
                 return;
             }
 
-            // 3. Декодируем эфемерный публичный собеседника
+            PublicKey peerRsaPublic = keyCache.get(peerName);
+            if (peerRsaPublic == null) {
+                context.failHandshake("No cached RSA key for verification");
+                return;
+            }
+
             PublicKey peerEphemeralPub = EcdhCrypto.publicKeyFromBase64(msg.ephemeralPublicKey);
             byte[] peerEphemeralBytes = peerEphemeralPub.getEncoded();
+            byte[] toVerify = SessionCrypto.signingPayload(
+                    "ack", peerName, ownName, peerEphemeralBytes);
             byte[] signatureBytes = Base64.getDecoder().decode(msg.signature);
 
-            // 4. Проверяем подпись
-            if (!RsaSignature.verify(peerEphemeralBytes, signatureBytes, peerRsaPublic)) {
+            if (!RsaSignature.verify(toVerify, signatureBytes, peerRsaPublic)) {
                 context.failHandshake("Invalid signature");
                 listener.onError("BAD_SIGNATURE", "Invalid signature in SESSION_ACK from " + peerName);
                 return;
             }
 
-            // 5. Вычисляем общий секрет используя НАШ эфемерный private и ИХ эфемерный public
-            byte[] sharedSecret = EcdhCrypto.computeSharedSecret(
+            byte[] ownEphemeralBytes = context.getEphemeralKeyPair().getPublic().getEncoded();
+            sharedSecret = EcdhCrypto.computeSharedSecret(
                     context.getEphemeralPrivateKey(), peerEphemeralPub);
-            byte[] sessionKeyBytes = HkdfCrypto.derive(sharedSecret, null, "secure-chat-session", 32);
 
-            // 6. Завершаем handshake — наш эфемерный приватный СТИРАЕТСЯ
-            context.completeHandshake(sessionKeyBytes);
+            SessionCrypto.DerivedKeys keys = SessionCrypto.derive(
+                    sharedSecret, ownName, peerName, ownEphemeralBytes, peerEphemeralBytes);
+
+            byte[] peerConfirmation = Base64.getDecoder().decode(msg.confirmation);
+            byte[] ownConfirmation = context.completeAsInitiator(keys, peerConfirmation);
+
+            // Send CONFIRM before waking the waiting sender, so the first DM
+            // cannot overtake it on the wire.
+            sendRaw(ClientMessage.sessionConfirm(
+                    peerName, Base64.getEncoder().encodeToString(ownConfirmation)));
+            context.markEstablished();
 
             listener.onSystem("Session established with " + peerName);
-
         } catch (Exception e) {
+            String peer = msg.fromClientName;
+            SessionContext context = peer != null ? sessions.get(peer) : null;
+            if (context != null) {
+                context.failHandshake("SESSION_ACK processing failed");
+            }
             listener.onError("HANDSHAKE_FAILED", "Failed to handle SESSION_ACK: " + e.getMessage());
+        } finally {
+            wipe(sharedSecret);
+        }
+    }
+
+    private void handleSessionConfirm(ServerMessage msg) {
+        try {
+            String peerName = msg.fromClientName;
+            SessionContext context = sessions.get(peerName);
+            if (context == null) {
+                return;
+            }
+            if (context.getState() == SessionContext.State.READY) {
+                return; // duplicate confirmation — harmless
+            }
+            if (msg.confirmation == null) {
+                context.failHandshake("Malformed SESSION_CONFIRM");
+                return;
+            }
+            context.confirmInitiator(Base64.getDecoder().decode(msg.confirmation));
+            listener.onSystem("Session established with " + peerName);
+        } catch (Exception e) {
+            listener.onError("HANDSHAKE_FAILED",
+                    "Failed to handle SESSION_CONFIRM: " + e.getMessage());
         }
     }
 
     private SessionContext getOrEstablishSession(String peerName) throws Exception {
-        SessionContext existing = sessions.get(peerName);
-        if (existing != null && existing.isReady() && !existing.isExpired()) {
-            return existing;   // готова И не истекла → переиспользуем
+        SessionContext context;
+        synchronized (sessionLock) {
+            context = sessions.get(peerName);
+
+            if (context != null && context.isReady() && !context.isExpired()) {
+                return context;
+            }
+            if (context != null && (context.isExpired()
+                    || context.getState() == SessionContext.State.FAILED)) {
+                context.destroy();
+                sessions.remove(peerName, context);
+                context = null;
+            }
+            if (context == null) {
+                instantiateHandshake(peerName);
+                context = sessions.get(peerName);
+                if (context == null) {
+                    throw new IllegalStateException(
+                            "Handshake context disappeared for " + peerName);
+                }
+            }
         }
 
-        // Сессия истекла — убираем старую перед новым handshake
-        if (existing != null && existing.isExpired()) {
-            existing.destroy();
-            sessions.remove(peerName);
-            listener.onSystem("Session with " + peerName + " expired, re-establishing...");
-        }
-
-        instantiateHandshake(peerName);
-        SessionContext context = sessions.get(peerName);
-        boolean ok = context.getHandshakeResult().get(10, TimeUnit.SECONDS);
+        // Wait outside the lock: a peer-initiated handshake needs the lock to
+        // install its responder context, and holding it here would deadlock.
+        boolean ok = awaitHandshake(context);
         if (!ok) {
-            throw new RuntimeException("Handshake failed with " + peerName);
+            SessionContext replacement = awaitReadyReplacement(peerName);
+            if (replacement != null) {
+                return replacement;
+            }
+            synchronized (sessionLock) {
+                sessions.remove(peerName, context);
+            }
+            context.destroy();
+            throw new IllegalStateException("Handshake failed with " + peerName);
         }
         return context;
     }
 
+    private boolean awaitHandshake(SessionContext context) {
+        try {
+            return Boolean.TRUE.equals(context.getHandshakeResult()
+                    .get(HANDSHAKE_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /**
-     * Acquire decoded server response
-     *
-     * @param msg - response from server ServerMessage.class
+     * When both peers start a handshake simultaneously this side may abandon
+     * its initiator role and answer as responder. Give that replacement
+     * handshake a short window to become ready instead of failing the send.
      */
-    private void handleIncoming(ServerMessage msg) throws CryptoException {
+    private SessionContext awaitReadyReplacement(String peerName) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            SessionContext current = sessions.get(peerName);
+            if (current != null && current.isReady() && !current.isExpired()) {
+                return current;
+            }
+            Thread.sleep(50);
+        }
+        return null;
+    }
+
+    private PublicKey requestPublicKey(String peerName) throws Exception {
+        PublicKey cached = keyCache.get(peerName);
+        if (cached != null) {
+            return cached;
+        }
+
+        CompletableFuture<PublicKey> future = new CompletableFuture<>();
+        CompletableFuture<PublicKey> existing = pendingKeyRequests.putIfAbsent(peerName, future);
+        if (existing != null) {
+            future = existing;
+        } else {
+            try {
+                sendRaw(ClientMessage.getKey(peerName));
+            } catch (Exception e) {
+                pendingKeyRequests.remove(peerName, future);
+                throw e;
+            }
+        }
+
+        try {
+            return future.get(HANDSHAKE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            pendingKeyRequests.remove(peerName, future);
+            throw new IllegalStateException("Cannot get RSA key for " + peerName, e);
+        }
+    }
+
+    private void handleIncoming(ServerMessage msg) {
+        if (msg == null || msg.type == null) {
+            return;
+        }
         switch (msg.type) {
             case DM -> handleDM(msg);
-            case DELIVERED -> handleDELIVERED(msg);
+            case DELIVERED -> listener.onDelivered();
             case ERROR -> handleERROR(msg);
             case PUBLIC_KEY -> handlePUBLIC_KEY(msg);
             case SYSTEM -> handleSYSTEM(msg);
             case INIT_SESSION -> handleInitSession(msg);
             case SESSION_ACK -> handleSessionAck(msg);
+            case SESSION_CONFIRM -> handleSessionConfirm(msg);
         }
     }
 
@@ -351,19 +527,17 @@ public class ChatClientCore {
             return;
         }
         try {
-            String plainText = AesCrypto.decrypt(msg.e2ePayload, session.getSessionKey());
-            session.touch();
+            long expectedSequence = session.nextExpectedSequence();
+            String plainText = SessionCrypto.decrypt(
+                    msg.e2ePayload,
+                    session.getReceiveKey(),
+                    msg.fromClientName,
+                    ownName,
+                    expectedSequence);
+            session.markReceived(expectedSequence);
             listener.onMessage(msg.fromClientName, plainText);
         } catch (Exception e) {
             listener.onDecryptionFailed(msg.fromClientName);
-        }
-    }
-
-    private void handleDELIVERED(ServerMessage msg) {
-        try {
-            listener.onDelivered();
-        } catch (Exception e) {
-            listener.onError(ErrorCode.INTERNAL_ERROR.name(), "[CLIENT][ERROR] error while handle DELIVERED message from server");
         }
     }
 
@@ -371,29 +545,79 @@ public class ChatClientCore {
         if (joinResult != null && !joinResult.isDone()) {
             joinResult.complete(false);
         }
+        if (msg.errorCode == ErrorCode.RECIPIENT_OFFLINE) {
+            IllegalStateException offline = new IllegalStateException(msg.text);
+            pendingKeyRequests.values().forEach(f -> f.completeExceptionally(offline));
+            pendingKeyRequests.clear();
+        }
         try {
-            listener.onError(msg.errorCode != null ? msg.errorCode.name() : "UNKNOWN", msg.text);
+            listener.onError(
+                    msg.errorCode != null ? msg.errorCode.name() : "UNKNOWN",
+                    msg.text);
         } catch (Exception e) {
-            listener.onError(ErrorCode.INTERNAL_ERROR.name(), "[CLIENT][ERROR] error while handle ERROR message from server");
+            listener.onError(ErrorCode.INTERNAL_ERROR.name(),
+                    "[CLIENT][ERROR] error while handling ERROR message from server");
         }
     }
 
     private void handlePUBLIC_KEY(ServerMessage msg) {
         try {
             PublicKey key = RsaCrypto.publicKeyFromBase64(msg.publicKey);
-            keyCache.putIfAbsent(msg.username, key);
+            keyCache.put(msg.username, key);
             CompletableFuture<PublicKey> future = pendingKeyRequests.remove(msg.username);
             if (future != null) {
                 future.complete(key);
             }
         } catch (Exception e) {
-
+            CompletableFuture<PublicKey> future = pendingKeyRequests.remove(msg.username);
+            if (future != null) {
+                future.completeExceptionally(e);
+            }
         }
     }
 
-    private void sendRaw(ClientMessage msg) throws JsonProcessingException, CryptoException {
-        String json = mapper.writeValueAsString(msg);
-        String encrypted = AesCrypto.encrypt(json, PSK_KEY);
-        out.println(encrypted);
+    private synchronized void sendRaw(ClientMessage msg) throws JsonProcessingException {
+        if (out == null) {
+            throw new IllegalStateException("Not connected");
+        }
+        out.println(mapper.writeValueAsString(msg));
+        if (out.checkError()) {
+            throw new IllegalStateException("Connection lost while sending");
+        }
+    }
+
+    private synchronized void destroyAllSessions() {
+        if (sessionsDestroyed) {
+            return;
+        }
+        sessionsDestroyed = true;
+        handshakeExecutor.shutdownNow();
+        for (SessionContext session : sessions.values()) {
+            try {
+                session.destroy();
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
+        sessions.clear();
+        pendingKeyRequests.values().forEach(f ->
+                f.completeExceptionally(new IllegalStateException("Disconnected")));
+        pendingKeyRequests.clear();
+    }
+
+    private void closeSocketQuietly() {
+        try {
+            if (sslSocket != null) {
+                sslSocket.close();
+            }
+        } catch (Exception ignored) {
+            // best effort
+        }
+    }
+
+    private static void wipe(byte[] value) {
+        if (value != null) {
+            Arrays.fill(value, (byte) 0);
+        }
     }
 }

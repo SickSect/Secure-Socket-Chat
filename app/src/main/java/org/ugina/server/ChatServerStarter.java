@@ -1,8 +1,9 @@
 package org.ugina.server;
 
 import org.ugina.auth.AuthProvider;
-import org.ugina.config.ChatTlsConfig;
+import org.ugina.config.ChatTlsConfigFactory;
 import org.ugina.config.ChatTlsProperties;
+import org.ugina.utils.CustomLogger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
@@ -14,17 +15,20 @@ public class ChatServerStarter implements CommandLineRunner {
     private final boolean enabled;
     private final AuthProvider authProvider;
     private final ChatTlsProperties tlsProperties;
+    private final ChatTlsConfigFactory tlsConfigFactory;
 
     public ChatServerStarter(
             @Value("${chat.tcp-port}") int port,
-            @Value("${chat.tcp-enabled}") boolean enabled,
+            @Value("${chat.tcp-enabled:true}") boolean enabled,
             AuthProvider authProvider,
-            ChatTlsProperties tlsProperties
+            ChatTlsProperties tlsProperties,
+            ChatTlsConfigFactory tlsConfigFactory
     ) {
         this.port = port;
         this.enabled = enabled;
         this.authProvider = authProvider;
         this.tlsProperties = tlsProperties;
+        this.tlsConfigFactory = tlsConfigFactory;
     }
 
     @Override
@@ -33,23 +37,17 @@ public class ChatServerStarter implements CommandLineRunner {
             return;
         }
 
-        ChatTlsConfig tlsConfig = new ChatTlsConfig(
-                tlsProperties.keyStore(),
-                tlsProperties.keyStorePassword() != null
-                        ? tlsProperties.keyStorePassword().toCharArray()
-                        : new char[0],
-                tlsProperties.keyPassword().toCharArray()
-        );
-
-        ChatServer server = new ChatServer(port, authProvider, tlsConfig);
-
         Thread thread = new Thread(() -> {
             try {
+                ChatServer server = new ChatServer(
+                        port, authProvider, tlsConfigFactory.create(tlsProperties));
                 server.start();
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                CustomLogger.logInfo(
+                        "Chat server failed to start: " + e.getMessage(),
+                        ChatServerStarter.class.getName());
             }
-        });
+        }, "chat-server");
         thread.setDaemon(true);
         thread.start();
     }

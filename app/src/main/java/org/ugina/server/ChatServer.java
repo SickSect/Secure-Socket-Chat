@@ -1,38 +1,34 @@
 package org.ugina.server;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.juli.logging.Log;
 import org.ugina.auth.AuthProvider;
 import org.ugina.config.ChatTlsConfig;
-import org.ugina.crypto.KeyLoader;
 import org.ugina.utils.CustomLogger;
 
-import javax.crypto.SecretKey;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLServerSocketFactory;
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Path;
-import java.security.GeneralSecurityException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * TLS-only chat server. All connections are accepted on a bounded thread pool
+ * so a flood of clients cannot exhaust the JVM thread/memory budget.
+ */
 @Slf4j
 public class ChatServer {
-    private static final SecretKey key;
+
+    private static final int CORE_POOL_SIZE = 8;
+    private static final int MAX_POOL_SIZE = 64;
+    private static final int QUEUE_CAPACITY = 256;
+    private static final long KEEP_ALIVE_SECONDS = 60;
+
     private final int port;
     private final AuthProvider authProvider;
     private final ChatTlsConfig tlsConfig;
-
-    static {
-        try {
-            key = KeyLoader.getSecretKey();
-        } catch (GeneralSecurityException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     public ChatServer(int port, AuthProvider authProvider, ChatTlsConfig tlsConfig) {
         this.port = port;
@@ -41,36 +37,53 @@ public class ChatServer {
     }
 
     public void start() throws Exception {
-        CustomLogger.logInfo("Start chat server...", ChatServer.class.getName());
-        ExecutorService executor = null;
+        CustomLogger.logInfo("Starting chat server on port " + port,
+                ChatServer.class.getName());
 
-        SSLContext sslContext = TlsServerContextFactory.createSSLContext(
-                tlsConfig.keyStore(),
-                tlsConfig.keyStorePassword()
-        );
+        SSLContext sslContext = TlsServerContextFactory.createSSLContext(tlsConfig);
         SSLServerSocketFactory factory = sslContext.getServerSocketFactory();
         SSLServerSocket serverSocket = (SSLServerSocket) factory.createServerSocket(port);
-        serverSocket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
+        serverSocket.setReuseAddress(true);
+        serverSocket.setEnabledProtocols(new String[]{"TLSv1.3"});
+        serverSocket.setNeedClientAuth(false);
 
-        try {
-            executor = Executors.newCachedThreadPool();
-            CustomLogger.logInfo("Waiting for client...", ChatServer.class.getName());
-            ChatRoom room = new ChatRoom();
-            while (true) {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                CORE_POOL_SIZE,
+                MAX_POOL_SIZE,
+                KEEP_ALIVE_SECONDS,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(QUEUE_CAPACITY),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "chat-client");
+                    thread.setDaemon(true);
+                    return thread;
+                },
+                new ThreadPoolExecutor.AbortPolicy());
+
+        ChatRoom room = new ChatRoom();
+        CustomLogger.logInfo("Waiting for TLS clients...", ChatServer.class.getName());
+
+        try (serverSocket) {
+            while (!Thread.currentThread().isInterrupted()) {
                 Socket socket = serverSocket.accept();
-                CustomLogger.logInfo(
-                        "Client connected! %s".formatted(socket.getRemoteSocketAddress()),
-                        ChatServer.class.getName()
-                );
-                ChatHandler handler = new ChatHandler(socket, room, key, authProvider);
-                executor.execute(handler);
+                try {
+                    executor.execute(new ChatHandler(socket, room, authProvider));
+                } catch (RejectedExecutionException e) {
+                    log.warn("Server is at capacity, rejecting connection from {}",
+                            socket.getRemoteSocketAddress());
+                    closeQuietly(socket);
+                }
             }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
         } finally {
-            if (executor != null) {
-                executor.shutdown();
-            }
+            executor.shutdownNow();
+        }
+    }
+
+    private static void closeQuietly(Socket socket) {
+        try {
+            socket.close();
+        } catch (Exception ignored) {
+            // best effort
         }
     }
 }

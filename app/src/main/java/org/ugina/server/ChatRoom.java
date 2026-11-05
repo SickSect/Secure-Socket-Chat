@@ -1,44 +1,80 @@
 package org.ugina.server;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ugina.crypto.AesCrypto;
-import org.ugina.crypto.KeyLoader;
-import org.ugina.protocol.*;
+import org.ugina.protocol.ClientMessage;
+import org.ugina.protocol.ServerMessage;
 
-import javax.crypto.SecretKey;
-import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Registry of connected clients plus a small replay cache.
+ *
+ * <p>The room no longer holds any application-layer key: all client/server
+ * traffic is protected by TLS. Message contents are end-to-end encrypted by
+ * the clients and the server only forwards opaque payloads.</p>
+ */
 public class ChatRoom {
-    private ConcurrentHashMap<String, ChatHandler> clientHandlers = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, PublicKey> clientPublicKeys = new ConcurrentHashMap<>();
-    private final ObjectMapper mapper = new ObjectMapper();
-    private SecretKey secretKey;
-    private final ConcurrentHashMap<String, Long> nonces = new ConcurrentHashMap<>();
-    private static final long NONCE_TTL_MS = 60_000;
 
-    public ChatRoom() throws GeneralSecurityException {
-        secretKey = KeyLoader.getSecretKey();
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor( r -> {
-            Thread thread = new Thread( r, "nonce-cleaner" );
-            thread.setDaemon( true );
+    private static final long NONCE_TTL_MS = 60_000;
+    private static final int MAX_NONCES = 100_000;
+
+    private final ConcurrentHashMap<String, ChatHandler> clientHandlers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PublicKey> clientPublicKeys = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> nonces = new ConcurrentHashMap<>();
+
+    public ChatRoom() {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "nonce-cleaner");
+            thread.setDaemon(true);
             return thread;
         });
         scheduler.scheduleAtFixedRate(this::cleanupNonces, 1, 1, TimeUnit.MINUTES);
     }
 
-    public boolean forwardHandshake(String toName, String fromName, String ephemeralKey, String signature, boolean isAsk){
-        ChatHandler recipient = clientHandlers.get(toName);
-        if (recipient == null) return false;
-        ServerMessage msg = isAsk ?
-                ServerMessage.sessionAsk(fromName, ephemeralKey, signature)
-                : ServerMessage.initSession(fromName, ephemeralKey, signature);
-        recipient.send(msg);
+    public boolean joinClient(String clientName, ChatHandler chatHandler, PublicKey key) {
+        ChatHandler existing = clientHandlers.putIfAbsent(clientName, chatHandler);
+        if (existing != null) {
+            return false;
+        }
+        clientPublicKeys.put(clientName, key);
         return true;
+    }
+
+    /**
+     * Removes the connection only if it is still the one registered for this
+     * username. This prevents a stale handler from evicting a newer session.
+     */
+    public void leaveClient(String clientName, ChatHandler handler) {
+        if (clientName == null || handler == null) {
+            return;
+        }
+        boolean removed = clientHandlers.remove(clientName, handler);
+        if (removed) {
+            clientPublicKeys.computeIfPresent(clientName,
+                    (name, key) -> clientHandlers.containsKey(name) ? key : null);
+        }
+    }
+
+    /**
+     * Replay protection is scoped to the sender, so two clients may use the
+     * same random nonce without one of them being rejected.
+     */
+    public boolean checkAndAddNonce(String sender, String nonce) {
+        if (sender == null || nonce == null) {
+            return false;
+        }
+        if (nonces.size() >= MAX_NONCES) {
+            cleanupNonces();
+            if (nonces.size() >= MAX_NONCES) {
+                nonces.clear();
+            }
+        }
+        long now = System.currentTimeMillis();
+        Long previous = nonces.putIfAbsent(sender + ':' + nonce, now + NONCE_TTL_MS);
+        return previous == null;
     }
 
     private void cleanupNonces() {
@@ -46,60 +82,49 @@ public class ChatRoom {
         nonces.entrySet().removeIf(e -> e.getValue() < now);
     }
 
-    public boolean joinClient(String clientName, ChatHandler chatHandler, PublicKey key){
-        ChatHandler existing = clientHandlers.putIfAbsent(clientName, chatHandler);
-        //ClientStatus status = clientStatuses.get(clientName);
-        if (existing != null) {
-            System.out.println("[joinClient] name taken: " + clientName);
+    public boolean forwardMessage(ClientMessage message, String fromName) {
+        ChatHandler recipient = clientHandlers.get(message.toClientName);
+        if (recipient == null) {
             return false;
         }
-        clientPublicKeys.putIfAbsent(clientName, key);
-        System.out.println("[joinClient] " + clientName + " joined");
+        recipient.send(ServerMessage.dm(fromName, message.e2ePayload));
         return true;
     }
 
-
-
-    public void leaveClient(String clientName) {
-        if (clientName == null) return;
-        System.out.println("[leaveClient] " + clientName + " left");
-        clientHandlers.remove(clientName);
-        clientPublicKeys.remove(clientName);
-    }
-
-    public boolean checkAndAddNonce(String nonce){
-        long now = System.currentTimeMillis();
-        Long previous = nonces.putIfAbsent(nonce, now + NONCE_TTL_MS);
-        return previous == null;
-    }
-
-
-    public void sendMessage(ClientMessage clientMessage, String clientName) {
-        ChatHandler recipient = clientHandlers.get(clientMessage.toClientName);
-        ChatHandler client = clientHandlers.get(clientName);
-        if (recipient == null){
-            ServerMessage error = new ServerMessage();
-            error.type = MessageType.ERROR;
-            error.errorCode = ErrorCode.RECIPIENT_OFFLINE;
-            error.text = "[ERROR] " + clientMessage.toClientName + " not connected";
-            sendTo(client, error);
-            return ;
+    public boolean forwardInit(String toName, String fromName, String ephemeralKey, String signature) {
+        ChatHandler recipient = clientHandlers.get(toName);
+        if (recipient == null) {
+            return false;
         }
-
-        sendTo(recipient, ServerMessage.dm(clientName, clientMessage.e2ePayload));
-        sendTo(client, ServerMessage.delivered());
-
-        ServerMessage approve = new ServerMessage();
-        approve.type = MessageType.DELIVERED;
-        sendTo(client, approve);
+        recipient.send(ServerMessage.initSession(fromName, ephemeralKey, signature));
+        return true;
     }
 
-    private void sendTo(ChatHandler handler, ServerMessage msg) {
-        if (handler == null) return;
-        handler.send(msg);   // send сам сериализует и шифрует
+    public boolean forwardAck(
+            String toName,
+            String fromName,
+            String ephemeralKey,
+            String signature,
+            String confirmation
+    ) {
+        ChatHandler recipient = clientHandlers.get(toName);
+        if (recipient == null) {
+            return false;
+        }
+        recipient.send(ServerMessage.sessionAck(fromName, ephemeralKey, signature, confirmation));
+        return true;
     }
 
-    public PublicKey getPublicKey(String clientName){
+    public boolean forwardConfirm(String toName, String fromName, String confirmation) {
+        ChatHandler recipient = clientHandlers.get(toName);
+        if (recipient == null) {
+            return false;
+        }
+        recipient.send(ServerMessage.sessionConfirm(fromName, confirmation));
+        return true;
+    }
+
+    public PublicKey getPublicKey(String clientName) {
         return clientPublicKeys.get(clientName);
     }
 }

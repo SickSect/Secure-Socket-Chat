@@ -10,8 +10,10 @@ public class ServerMessage {
     public String publicKey;
     public String ephemeralPublicKey;
     public String signature;
+    public String confirmation;
 
-    public ServerMessage() {}
+    public ServerMessage() {
+    }
 
     public static ServerMessage dm(String from, String e2ePayload) {
         ServerMessage m = new ServerMessage();
@@ -50,7 +52,11 @@ public class ServerMessage {
         return m;
     }
 
-    public static ServerMessage initSession(String from, String ephemeralPublicKey, String signature){
+    public static ServerMessage initSession(
+            String from,
+            String ephemeralPublicKey,
+            String signature
+    ) {
         ServerMessage m = new ServerMessage();
         m.type = MessageType.INIT_SESSION;
         m.fromClientName = from;
@@ -59,12 +65,26 @@ public class ServerMessage {
         return m;
     }
 
-    public static ServerMessage sessionAsk(String from, String ephemeralPublicKey, String signature){
+    public static ServerMessage sessionAck(
+            String from,
+            String ephemeralPublicKey,
+            String signature,
+            String confirmation
+    ) {
         ServerMessage m = new ServerMessage();
         m.type = MessageType.SESSION_ACK;
         m.fromClientName = from;
         m.ephemeralPublicKey = ephemeralPublicKey;
         m.signature = signature;
+        m.confirmation = confirmation;
+        return m;
+    }
+
+    public static ServerMessage sessionConfirm(String from, String confirmation) {
+        ServerMessage m = new ServerMessage();
+        m.type = MessageType.SESSION_CONFIRM;
+        m.fromClientName = from;
+        m.confirmation = confirmation;
         return m;
     }
 }

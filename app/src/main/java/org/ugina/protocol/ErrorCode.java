@@ -3,12 +3,13 @@ package org.ugina.protocol;
 public enum ErrorCode {
     INVALID_NAME,
     NAME_TAKEN,
-    INVALID_PUBLIC_KEY,   // ← новое
+    INVALID_PUBLIC_KEY,
     RECIPIENT_OFFLINE,
-    EXPIRED,              // ← новое
-    REPLAY,               // ← новое
+    EXPIRED,
+    REPLAY,
     DECRYPTION_FAILED,
     INVALID_FORMAT,
+    RATE_LIMITED,
     INTERNAL_ERROR,
     INVALID_TOKEN
 }

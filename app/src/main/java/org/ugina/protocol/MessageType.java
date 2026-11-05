@@ -7,5 +7,6 @@ public enum MessageType {
     SYSTEM,
     PUBLIC_KEY,
     INIT_SESSION,
-    SESSION_ACK
+    SESSION_ACK,
+    SESSION_CONFIRM
 }
