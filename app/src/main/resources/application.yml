@@ -29,7 +29,11 @@ auth:
     # Leave empty to let JwtService generate a random per-process secret.
     # Set JWT_SECRET to at least 32 random bytes in production.
     secret: ${JWT_SECRET:}
-    expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+    # Access-token TTL. Short on purpose: access tokens cannot be revoked
+    # one by one, so the damage window of a stolen token is bounded here.
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:10}
+    # Long-lived, single-use refresh tokens (rotated on every /refresh).
+    refresh-token-days: ${REFRESH_TOKEN_DAYS:30}
 
 spring:
   autoconfigure:
@@ -61,4 +65,7 @@ rate-limit:
     period-minutes: 60
   login:
     capacity: 10
+    period-minutes: 60
+  refresh:
+    capacity: 30
     period-minutes: 60

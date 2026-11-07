@@ -12,4 +12,6 @@ import org.springframework.stereotype.Component;
 public class JwtProperties {
     private String secret;
     private int expirationMinutes;
+    /** Lifetime of refresh tokens in days (default 30). */
+    private int refreshTokenDays = 30;
 }

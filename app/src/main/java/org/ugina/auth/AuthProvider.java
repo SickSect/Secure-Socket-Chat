@@ -37,4 +37,20 @@ public interface AuthProvider {
      * @throws InvalidTokenException если токен невалиден или истёк
      */
     UserPrincipal validate(String token) throws InvalidTokenException;
+
+    /**
+     * Заменяет публичный identity-ключ пользователя (ротация ключа).
+     * Требует повторной аутентификации паролем (step-up), а не только
+     * действующей сессии: украденный access-токен не даёт возможности
+     * подменить ключ.
+     *
+     * @param username  владелец ключа (из валидной сессии)
+     * @param password  текущий пароль — доказательство владения аккаунтом
+     * @param publicKey новый RSA-публичный ключ в Base64 (≥ 2048)
+     * @return обновлённый профиль
+     * @throws AuthenticationException если пароль неверен
+     * @throws RegistrationException   если ключ некорректен
+     */
+    UserPrincipal rotateKey(String username, String password, String publicKey)
+            throws AuthenticationException, RegistrationException;
 }

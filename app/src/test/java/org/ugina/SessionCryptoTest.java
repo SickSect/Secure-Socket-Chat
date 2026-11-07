@@ -7,7 +7,6 @@ import org.ugina.crypto.exception.CryptoException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
-import java.util.Arrays;
 import java.util.Base64;
 
 import static org.testng.Assert.*;
@@ -16,13 +15,11 @@ public class SessionCryptoTest {
 
     private record Handshake(
             SessionCrypto.DerivedKeys alice,
-            SessionCrypto.DerivedKeys bob,
-            byte[] aliceEphemeral,
-            byte[] bobEphemeral
+            SessionCrypto.DerivedKeys bob
     ) {
     }
 
-    private Handshake deriveBothSides(String aliceName, String bobName) throws Exception {
+    private Handshake deriveBoth(String initiator, String responder) throws Exception {
         KeyPair aliceKeyPair = EcdhCrypto.generateKeyPair();
         KeyPair bobKeyPair = EcdhCrypto.generateKeyPair();
         byte[] alicePub = aliceKeyPair.getPublic().getEncoded();
@@ -34,118 +31,236 @@ public class SessionCryptoTest {
                 bobKeyPair.getPrivate(), aliceKeyPair.getPublic());
 
         return new Handshake(
-                SessionCrypto.derive(aliceSecret, aliceName, bobName, alicePub, bobPub),
-                SessionCrypto.derive(bobSecret, aliceName, bobName, alicePub, bobPub),
-                alicePub,
-                bobPub);
+                SessionCrypto.derive(aliceSecret, initiator, responder, alicePub, bobPub),
+                SessionCrypto.derive(bobSecret, initiator, responder, alicePub, bobPub));
+    }
+
+    // ─── handshake derivation ───
+
+    @Test
+    public void bothSidesDeriveIdenticalRootAndConfirmations() throws Exception {
+        Handshake h = deriveBoth("alice", "bob");
+
+        assertBytesEqual(h.alice().rootKey(), h.bob().rootKey());
+        assertBytesEqual(h.alice().initiatorConfirm(), h.bob().initiatorConfirm());
+        assertBytesEqual(h.alice().responderConfirm(), h.bob().responderConfirm());
+        assertBytesEqual(h.alice().transcriptHash(), h.bob().transcriptHash());
+        assertFalse(java.util.Arrays.equals(
+                h.alice().initiatorConfirm(), h.alice().responderConfirm()),
+                "the two confirmation tags must differ");
     }
 
     @Test
-    public void bothSidesDeriveTheSameDirectionalKeys() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
+    public void differentSessionsDeriveDifferentRoots() throws Exception {
+        Handshake first = deriveBoth("alice", "bob");
+        Handshake second = deriveBoth("alice", "bob");
 
-        assertEquals(h.alice().initiatorToResponder().getEncoded(),
-                h.bob().initiatorToResponder().getEncoded());
-        assertEquals(h.alice().responderToInitiator().getEncoded(),
-                h.bob().responderToInitiator().getEncoded());
-        assertEquals(h.alice().initiatorConfirm(), h.bob().initiatorConfirm());
-        assertEquals(h.alice().responderConfirm(), h.bob().responderConfirm());
-        assertEquals(h.alice().transcriptHash(), h.bob().transcriptHash());
-
-        assertFalse(Arrays.equals(
-                h.alice().initiatorToResponder().getEncoded(),
-                h.alice().responderToInitiator().getEncoded()),
-                "directions must use different keys");
+        assertFalse(java.util.Arrays.equals(first.alice().rootKey(), second.alice().rootKey()),
+                "fresh handshakes must never reuse a root key");
     }
 
     @Test
-    public void transcriptBindsBothEphemeralKeys() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
+    public void transcriptBindsBothIdentities() throws Exception {
+        Handshake honest = deriveBoth("alice", "bob");
+        Handshake swapped = deriveBoth("bob", "alice");
 
-        SessionCrypto.DerivedKeys swapped = SessionCrypto.derive(
-                h.alice().initiatorToResponder().getEncoded(),
-                "alice", "bob", h.bobEphemeral(), h.aliceEphemeral());
+        assertFalse(java.util.Arrays.equals(
+                        honest.alice().rootKey(), swapped.alice().rootKey()),
+                "renaming the peers must change the derived root");
+    }
 
-        assertFalse(Arrays.equals(
-                h.alice().transcriptHash(), swapped.transcriptHash()),
-                "swapping ephemeral keys must change the transcript");
+    // ─── ratchet KDFs ───
+
+    @Test
+    public void kdfRkIsDeterministicAndDirectional() throws Exception {
+        byte[] root = new byte[32];
+        java.util.Arrays.fill(root, (byte) 7);
+        byte[] dh = new byte[32];
+        java.util.Arrays.fill(dh, (byte) 9);
+
+        SessionCrypto.RatchetStep a = SessionCrypto.kdfRk(root, dh, "i2r");
+        SessionCrypto.RatchetStep b = SessionCrypto.kdfRk(root, dh, "i2r");
+        SessionCrypto.RatchetStep otherDirection = SessionCrypto.kdfRk(root, dh, "r2i");
+
+        assertBytesEqual(a.rootKey(), b.rootKey());
+        assertBytesEqual(a.chainKey(), b.chainKey());
+        assertFalse(java.util.Arrays.equals(a.chainKey(), otherDirection.chainKey()),
+                "the two directions must never share a chain key");
+        assertFalse(java.util.Arrays.equals(a.rootKey(), root),
+                "the root key must rotate on every ratchet step");
+        assertFalse(java.util.Arrays.equals(a.rootKey(), a.chainKey()));
     }
 
     @Test
-    public void transcriptBindsUsernames() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
-        SessionCrypto.DerivedKeys other = SessionCrypto.derive(
-                h.alice().initiatorToResponder().getEncoded(),
-                "mallory", "bob", h.aliceEphemeral(), h.bobEphemeral());
+    public void kdfCkProducesFreshMessageKeys() throws Exception {
+        byte[] chain = new byte[32];
+        java.util.Arrays.fill(chain, (byte) 3);
 
-        assertFalse(Arrays.equals(
-                h.alice().transcriptHash(), other.transcriptHash()),
-                "changing an identity must change the transcript");
-    }
+        SessionCrypto.ChainStep first = SessionCrypto.kdfCk(chain);
+        SessionCrypto.ChainStep second = SessionCrypto.kdfCk(first.nextChainKey());
 
-    @Test
-    public void encryptDecryptRoundTrip() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
-        String cipherText = SessionCrypto.encrypt(
-                "hello", h.alice().initiatorToResponder(), "alice", "bob", 0);
-
-        String plainText = SessionCrypto.decrypt(
-                cipherText, h.bob().initiatorToResponder(), "alice", "bob", 0);
-        assertEquals(plainText, "hello");
+        assertFalse(java.util.Arrays.equals(first.messageKey(), first.nextChainKey()));
+        assertFalse(java.util.Arrays.equals(first.messageKey(), second.messageKey()),
+                "every chain step must produce a different message key");
+        assertFalse(java.util.Arrays.equals(first.nextChainKey(), second.nextChainKey()));
     }
 
     @Test(expectedExceptions = CryptoException.class)
-    public void replayWithOldSequenceIsRejected() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
-        String cipherText = SessionCrypto.encrypt(
-                "hello", h.alice().initiatorToResponder(), "alice", "bob", 5);
-
-        SessionCrypto.decrypt(
-                cipherText, h.bob().initiatorToResponder(), "alice", "bob", 6);
+    public void kdfRkRejectsMissingInput() throws Exception {
+        SessionCrypto.kdfRk(null, new byte[32], "i2r");
     }
 
-    @Test(expectedExceptions = CryptoException.class)
-    public void wrongSenderIsRejectedByAad() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
-        String cipherText = SessionCrypto.encrypt(
-                "hello", h.alice().initiatorToResponder(), "alice", "bob", 0);
+    // ─── message format ───
 
-        SessionCrypto.decrypt(
-                cipherText, h.bob().initiatorToResponder(), "mallory", "bob", 0);
-    }
+    @Test
+    public void encryptDecryptRoundtrip() throws Exception {
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
+        String payload = SessionCrypto.encrypt(
+                "hello мир", secretKey(step.messageKey()), "alice", "bob", 0, 0, null);
 
-    @Test(expectedExceptions = CryptoException.class)
-    public void tamperedCiphertextIsRejected() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
-        String cipherText = SessionCrypto.encrypt(
-                "hello", h.alice().initiatorToResponder(), "alice", "bob", 0);
-
-        byte[] payload = Base64.getDecoder().decode(cipherText);
-        payload[payload.length - 1] ^= 0x01;
-        String tampered = Base64.getEncoder().encodeToString(payload);
-
-        SessionCrypto.decrypt(
-                tampered, h.bob().initiatorToResponder(), "alice", "bob", 0);
-    }
-
-    @Test(expectedExceptions = CryptoException.class)
-    public void wrongDirectionKeyIsRejected() throws Exception {
-        Handshake h = deriveBothSides("alice", "bob");
-        String cipherText = SessionCrypto.encrypt(
-                "hello", h.alice().initiatorToResponder(), "alice", "bob", 0);
-
-        SessionCrypto.decrypt(
-                cipherText, h.bob().responderToInitiator(), "alice", "bob", 0);
+        String plain = SessionCrypto.decrypt(payload, secretKey(step.messageKey()),
+                "alice", "bob", 0, 0);
+        assertEquals(plain, "hello мир");
     }
 
     @Test
-    public void signingPayloadChangesWithRoleAndPeer() {
-        byte[] ephemeral = "ephemeral".getBytes(StandardCharsets.UTF_8);
-        byte[] init = SessionCrypto.signingPayload("init", "alice", "bob", ephemeral);
-        byte[] ack = SessionCrypto.signingPayload("ack", "alice", "bob", ephemeral);
-        byte[] otherPeer = SessionCrypto.signingPayload("init", "alice", "carol", ephemeral);
+    public void roundtripWithEmbeddedRatchetKey() throws Exception {
+        KeyPair pair = EcdhCrypto.generateKeyPair();
+        byte[] rawRatchetKey = EcdhCrypto.publicKeyToRaw(pair.getPublic());
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
 
-        assertFalse(Arrays.equals(init, ack));
-        assertFalse(Arrays.equals(init, otherPeer));
+        String payload = SessionCrypto.encrypt("hi", secretKey(step.messageKey()),
+                "alice", "bob", 4, 2, rawRatchetKey);
+
+        SessionCrypto.Header header = SessionCrypto.parseHeader(payload);
+        assertTrue(header.hasNewRatchetKey());
+        assertBytesEqual(header.ratchetPublicKey(), rawRatchetKey);
+        assertEquals(header.sequence(), 4);
+        assertEquals(header.chainIndex(), 2);
+
+        String plain = SessionCrypto.decrypt(payload, secretKey(step.messageKey()),
+                "alice", "bob", 4, 2);
+        assertEquals(plain, "hi");
+    }
+
+    @Test
+    public void decryptRejectsWrongSequenceOrChainIndex() throws Exception {
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
+        String payload = SessionCrypto.encrypt("x", secretKey(step.messageKey()),
+                "alice", "bob", 5, 3, null);
+
+        try {
+            SessionCrypto.decrypt(payload, secretKey(step.messageKey()),
+                    "alice", "bob", 6, 3);
+            fail("wrong sequence must be rejected");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+        try {
+            SessionCrypto.decrypt(payload, secretKey(step.messageKey()),
+                    "alice", "bob", 5, 4);
+            fail("wrong chain index must be rejected");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+    }
+
+    @Test
+    public void decryptRejectsWrongKeyAndWrongIdentities() throws Exception {
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
+        byte[] otherChain = new byte[32];
+        otherChain[0] = 1; // genuinely different chain key
+        SessionCrypto.ChainStep other = SessionCrypto.kdfCk(otherChain);
+        String payload = SessionCrypto.encrypt("secret", secretKey(step.messageKey()),
+                "alice", "bob", 0, 0, null);
+
+        try {
+            SessionCrypto.decrypt(payload, secretKey(other.messageKey()),
+                    "alice", "bob", 0, 0);
+            fail("wrong message key must be rejected");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+        try {
+            SessionCrypto.decrypt(payload, secretKey(step.messageKey()),
+                    "mallory", "bob", 0, 0);
+            fail("rewritten sender identity must be rejected (AAD)");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+    }
+
+    @Test
+    public void tamperedPayloadIsRejected() throws Exception {
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
+        String payload = SessionCrypto.encrypt("intact", secretKey(step.messageKey()),
+                "alice", "bob", 0, 0, null);
+
+        byte[] bytes = Base64.getDecoder().decode(payload);
+        bytes[bytes.length - 1] ^= 0x01;
+        String tampered = Base64.getEncoder().encodeToString(bytes);
+
+        try {
+            SessionCrypto.decrypt(tampered, secretKey(step.messageKey()),
+                    "alice", "bob", 0, 0);
+            fail("tampered ciphertext must be rejected");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+    }
+
+    @Test
+    public void parseHeaderRejectsUnknownFlagsAndBadVersion() throws Exception {
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
+        String payload = SessionCrypto.encrypt("x", secretKey(step.messageKey()),
+                "alice", "bob", 0, 0, null);
+
+        byte[] bytes = Base64.getDecoder().decode(payload);
+        bytes[1] = (byte) 0x7F; // unknown flag bits
+        try {
+            SessionCrypto.parseHeader(Base64.getEncoder().encodeToString(bytes));
+            fail("unknown flags must be rejected");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+
+        bytes = Base64.getDecoder().decode(payload);
+        bytes[0] = 2; // pretend to be a v2 payload
+        try {
+            SessionCrypto.parseHeader(Base64.getEncoder().encodeToString(bytes));
+            fail("wrong version must be rejected");
+        } catch (CryptoException expectedFailure) {
+            // expected
+        }
+    }
+
+    @Test(expectedExceptions = CryptoException.class)
+    public void encryptRejectsMalformedRatchetKey() throws Exception {
+        SessionCrypto.ChainStep step = SessionCrypto.kdfCk(new byte[32]);
+        SessionCrypto.encrypt("x", secretKey(step.messageKey()),
+                "alice", "bob", 0, 0, new byte[10]);
+    }
+
+    @Test
+    public void signingPayloadBindsRoleAndIdentities() {
+        byte[] key = "k".getBytes(StandardCharsets.UTF_8);
+        byte[] init = SessionCrypto.signingPayload("init", "alice", "bob", key);
+        byte[] ack = SessionCrypto.signingPayload("ack", "alice", "bob", key);
+        byte[] otherPeer = SessionCrypto.signingPayload("init", "alice", "carol", key);
+
+        assertFalse(java.util.Arrays.equals(init, ack));
+        assertFalse(java.util.Arrays.equals(init, otherPeer));
+    }
+
+    private static javax.crypto.SecretKey secretKey(byte[] raw) {
+        return new org.ugina.crypto.DestroyableSecretKey(raw.clone(), "AES");
+    }
+
+    private static void assertBytesEqual(byte[] actual, byte[] expected) {
+        assertBytesEqual(actual, expected, "expected byte arrays to be equal");
+    }
+
+    private static void assertBytesEqual(byte[] actual, byte[] expected, String message) {
+        assertTrue(java.util.Arrays.equals(actual, expected), message);
     }
 }

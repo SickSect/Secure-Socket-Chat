@@ -81,6 +81,10 @@ public class RateLimitService {
         return properties.getLogin();
     }
 
+    public RateLimitProperties.Limit refreshLimit() {
+        return properties.getRefresh();
+    }
+
     private static final class Entry {
         private final Bucket bucket;
         private volatile long lastUsedAt;

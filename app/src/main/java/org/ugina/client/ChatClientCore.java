@@ -4,14 +4,17 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ugina.crypto.EcdhCrypto;
+import org.ugina.crypto.KeyFingerprint;
 import org.ugina.crypto.RsaCrypto;
 import org.ugina.crypto.RsaSignature;
+import org.ugina.crypto.SafetyNumber;
 import org.ugina.crypto.SessionCrypto;
 import org.ugina.crypto.exception.CryptoException;
 import org.ugina.protocol.ClientMessage;
 import org.ugina.protocol.ErrorCode;
 import org.ugina.protocol.ServerMessage;
 import org.ugina.utils.FrameReader;
+import org.ugina.utils.UsernamePolicy;
 
 import javax.crypto.SecretKey;
 import javax.net.ssl.SSLContext;
@@ -28,8 +31,10 @@ import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -43,6 +48,7 @@ public class ChatClientCore {
     private final ChatEventListener listener;
     private final String host;
     private final int port;
+    private final PeerTrustStore trustStore;
 
     private final ObjectMapper mapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -67,14 +73,25 @@ public class ChatClientCore {
 
     private String ownName;
     private PrivateKey privateKey;
+    private PublicKey ownPublicKey;
 
     private volatile boolean connected = true;
     private volatile boolean sessionsDestroyed = false;
 
     public ChatClientCore(ChatEventListener listener, String host, int port) {
+        this(listener, host, port, PeerTrustStore.defaultStore());
+    }
+
+    /**
+     * Allows tests and isolated profiles to inject a trust store. Production
+     * code uses {@link PeerTrustStore#defaultStore()}.
+     */
+    public ChatClientCore(ChatEventListener listener, String host, int port,
+                          PeerTrustStore trustStore) {
         this.listener = listener;
         this.host = host;
         this.port = port;
+        this.trustStore = Objects.requireNonNull(trustStore, "trustStore");
     }
 
     /**
@@ -92,7 +109,11 @@ public class ChatClientCore {
         }
         this.ownName = username;
         this.privateKey = keyPair.getPrivate();
+        this.ownPublicKey = keyPair.getPublic();
         this.sessionsDestroyed = false;
+        // Re-check peer keys after every reconnect instead of trusting a key
+        // that was cached during a previous connection.
+        this.keyCache.clear();
 
         SSLContext sslContext = TlsClientContextFactory.createDefaultContext();
         System.out.println("Connecting to " + host + ":" + port + " via TLS...");
@@ -158,15 +179,92 @@ public class ChatClientCore {
         }
 
         SessionContext session = getOrEstablishSession(recipient);
-        long sequence = session.nextSendSequence();
-        String e2ePayload = SessionCrypto.encrypt(
-                text, session.getSendKey(), ownName, recipient, sequence);
+        SessionContext.SendTicket ticket = session.beginSend();
+        try {
+            String e2ePayload = SessionCrypto.encrypt(
+                    text, ticket.messageKey(), ownName, recipient,
+                    ticket.sequence(), ticket.chainIndex(), ticket.newRatchetPublicKey());
 
-        byte[] nonceBytes = new byte[16];
-        random.nextBytes(nonceBytes);
-        String nonce = Base64.getEncoder().encodeToString(nonceBytes);
+            byte[] nonceBytes = new byte[16];
+            random.nextBytes(nonceBytes);
+            String nonce = Base64.getEncoder().encodeToString(nonceBytes);
 
-        sendRaw(ClientMessage.message(recipient, nonce, e2ePayload));
+            sendRaw(ClientMessage.message(recipient, nonce, e2ePayload));
+            session.commitSend(ticket);
+        } finally {
+            ticket.destroyMessageKey();
+        }
+    }
+
+    /**
+     * Full fingerprint of this user's identity key, for manual comparison with
+     * the other side's {@code /fingerprint} output.
+     */
+    public String ownFingerprint() {
+        PublicKey key = ownPublicKey;
+        if (key == null) {
+            throw new IllegalStateException("Not connected");
+        }
+        return KeyFingerprint.hex(key);
+    }
+
+    /**
+     * Fingerprint of the key currently trusted for {@code peerName}. If the
+     * key has not been fetched yet, this requests it from the server (and
+     * applies the local pin check).
+     */
+    public String peerFingerprint(String peerName) throws Exception {
+        return KeyFingerprint.hex(resolvePeerKey(peerName));
+    }
+
+    /**
+     * Deterministic number derived from both identity keys. Both users must see
+     * the same value; compare it over a channel the server cannot control.
+     */
+    public String safetyNumber(String peerName) throws Exception {
+        PublicKey own = ownPublicKey;
+        String me = ownName;
+        if (own == null || me == null) {
+            throw new IllegalStateException("Not connected");
+        }
+        requireUsername(peerName);
+        return SafetyNumber.of(me, own, peerName, resolvePeerKey(peerName));
+    }
+
+    /** Fingerprint of a changed key that is waiting for explicit trust. */
+    public String pendingPeerFingerprint(String peerName) {
+        if (!UsernamePolicy.isValid(peerName)) {
+            return null;
+        }
+        return trustStore.pendingFingerprint(peerName).orElse(null);
+    }
+
+    /**
+     * Accepts a changed peer key after the user verified its fingerprint out of
+     * band. The key becomes trusted and is used for the next handshake.
+     */
+    public String trustPendingPeerKey(String peerName, String fingerprintPrefix) throws Exception {
+        requireUsername(peerName);
+        PublicKey key = trustStore.trustPending(peerName, fingerprintPrefix);
+        keyCache.put(peerName, key);
+        String fingerprint = KeyFingerprint.hex(key);
+        listener.onPeerKeyTrusted(peerName, fingerprint, false);
+        return fingerprint;
+    }
+
+    private PublicKey resolvePeerKey(String peerName) throws Exception {
+        requireUsername(peerName);
+        PublicKey cached = keyCache.get(peerName);
+        if (cached != null) {
+            return cached;
+        }
+        return requestPublicKey(peerName);
+    }
+
+    private static void requireUsername(String username) {
+        if (!UsernamePolicy.isValid(username)) {
+            throw new IllegalArgumentException("Invalid username");
+        }
     }
 
     private void startReaderThread() {
@@ -233,7 +331,8 @@ public class ChatClientCore {
                     "init", peerName, ownName, peerEphemeralBytes);
             byte[] signature = Base64.getDecoder().decode(msg.signature);
 
-            if (!RsaSignature.verify(toVerify, signature, peerRsaPublicKey)) {
+            if (!verifyPeerSignature(toVerify, signature, peerName,
+                    peerRsaPublicKey, this::refreshPeerKey)) {
                 listener.onError("BAD_SIGNATURE", "Invalid signature in INIT_SESSION from " + peerName);
                 return;
             }
@@ -331,19 +430,17 @@ public class ChatClientCore {
                 return;
             }
 
-            PublicKey peerRsaPublic = keyCache.get(peerName);
-            if (peerRsaPublic == null) {
-                context.failHandshake("No cached RSA key for verification");
-                return;
-            }
-
             PublicKey peerEphemeralPub = EcdhCrypto.publicKeyFromBase64(msg.ephemeralPublicKey);
             byte[] peerEphemeralBytes = peerEphemeralPub.getEncoded();
             byte[] toVerify = SessionCrypto.signingPayload(
                     "ack", peerName, ownName, peerEphemeralBytes);
             byte[] signatureBytes = Base64.getDecoder().decode(msg.signature);
 
-            if (!RsaSignature.verify(toVerify, signatureBytes, peerRsaPublic)) {
+            // Uses the cached key when possible and retries once with a
+            // freshly fetched key — the peer may have rotated its identity
+            // key while this connection was up (see verifyPeerSignature).
+            if (!verifyPeerSignature(toVerify, signatureBytes, peerName,
+                    keyCache.get(peerName), this::refreshPeerKey)) {
                 context.failHandshake("Invalid signature");
                 listener.onError("BAD_SIGNATURE", "Invalid signature in SESSION_ACK from " + peerName);
                 return;
@@ -357,7 +454,8 @@ public class ChatClientCore {
                     sharedSecret, ownName, peerName, ownEphemeralBytes, peerEphemeralBytes);
 
             byte[] peerConfirmation = Base64.getDecoder().decode(msg.confirmation);
-            byte[] ownConfirmation = context.completeAsInitiator(keys, peerConfirmation);
+            byte[] ownConfirmation = context.completeAsInitiator(
+                    keys, peerConfirmation, peerEphemeralPub);
 
             // Send CONFIRM before waking the waiting sender, so the first DM
             // cannot overtake it on the wire.
@@ -491,10 +589,71 @@ public class ChatClientCore {
 
         try {
             return future.get(HANDSHAKE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            pendingKeyRequests.remove(peerName, future);
+            throw new IllegalStateException(
+                    "Interrupted while waiting for RSA key for " + peerName, e);
+        } catch (ExecutionException e) {
+            pendingKeyRequests.remove(peerName, future);
+            Throwable cause = e.getCause();
+            if (cause instanceof PeerKeyMismatchException mismatch) {
+                // Keep the detailed message for the TUI: it contains the
+                // expected/offered fingerprints and the /trust command.
+                throw mismatch;
+            }
+            if (cause instanceof Exception exception) {
+                throw new IllegalStateException(
+                        "Cannot get RSA key for " + peerName, exception);
+            }
+            throw new IllegalStateException("Cannot get RSA key for " + peerName, cause);
         } catch (Exception e) {
             pendingKeyRequests.remove(peerName, future);
             throw new IllegalStateException("Cannot get RSA key for " + peerName, e);
         }
+    }
+
+    /**
+     * Source of a freshly fetched peer key. Package-private so tests can
+     * inject a fake source without a live connection.
+     */
+    @FunctionalInterface
+    interface PeerKeySource {
+        PublicKey get(String peerName) throws Exception;
+    }
+
+    /**
+     * Drops the cached key and fetches it again — the response passes through
+     * {@link PeerTrustStore}, so a rotated key raises the explicit
+     * "key changed" warning and the {@code /trust} flow instead of a bare
+     * BAD_SIGNATURE.
+     */
+    private PublicKey refreshPeerKey(String peerName) throws Exception {
+        keyCache.remove(peerName);
+        return requestPublicKey(peerName);
+    }
+
+    /**
+     * Verifies a peer's RSA signature, retrying once with a freshly fetched
+     * key when the key we used fails.
+     *
+     * <p>Why the retry: {@code keyCache} lives for the whole connection, so a
+     * peer that rotates its identity key mid-connection would otherwise make
+     * every new handshake fail with a confusing {@code BAD_SIGNATURE}. The
+     * retry turns that into the proper trust flow: the refetched key differs
+     * from the pinned one, {@link PeerTrustStore} blocks it and the user
+     * verifies the fingerprint out of band.</p>
+     */
+    boolean verifyPeerSignature(byte[] payload, byte[] signature, String peerName,
+                                PublicKey usedKey, PeerKeySource refetch) throws Exception {
+        if (usedKey != null && RsaSignature.verify(payload, signature, usedKey)) {
+            return true;
+        }
+        // Either the cached key is stale (rotation) or the signature is
+        // forged — in both cases ask the server again; the TOFU/trust check
+        // runs on the response either way.
+        PublicKey fresh = refetch.get(peerName);
+        return RsaSignature.verify(payload, signature, fresh);
     }
 
     private void handleIncoming(ServerMessage msg) {
@@ -526,18 +685,27 @@ public class ChatClientCore {
             listener.onDecryptionFailed(msg.fromClientName);
             return;
         }
+        SessionContext.ReceivePlan plan = null;
         try {
-            long expectedSequence = session.nextExpectedSequence();
+            SessionCrypto.Header header = SessionCrypto.parseHeader(msg.e2ePayload);
+            plan = session.planReceive(header);
             String plainText = SessionCrypto.decrypt(
                     msg.e2ePayload,
-                    session.getReceiveKey(),
+                    plan.messageKey(),
                     msg.fromClientName,
                     ownName,
-                    expectedSequence);
-            session.markReceived(expectedSequence);
+                    header.sequence(),
+                    header.chainIndex());
+            session.commitReceive(plan);
             listener.onMessage(msg.fromClientName, plainText);
         } catch (Exception e) {
+            // The plan (and any ratchet step it contained) is discarded, so a
+            // forged or replayed message can never corrupt the session state.
             listener.onDecryptionFailed(msg.fromClientName);
+        } finally {
+            if (plan != null) {
+                plan.destroyMessageKey();
+            }
         }
     }
 
@@ -561,18 +729,40 @@ public class ChatClientCore {
     }
 
     private void handlePUBLIC_KEY(ServerMessage msg) {
+        if (msg.username == null || msg.publicKey == null) {
+            completeKeyRequestExceptionally(msg.username,
+                    new IllegalArgumentException("Malformed PUBLIC_KEY"));
+            return;
+        }
+
         try {
             PublicKey key = RsaCrypto.publicKeyFromBase64(msg.publicKey);
+            PeerTrustStore.Verification verification = trustStore.verify(msg.username, key);
+
             keyCache.put(msg.username, key);
             CompletableFuture<PublicKey> future = pendingKeyRequests.remove(msg.username);
             if (future != null) {
                 future.complete(key);
             }
-        } catch (Exception e) {
-            CompletableFuture<PublicKey> future = pendingKeyRequests.remove(msg.username);
-            if (future != null) {
-                future.completeExceptionally(e);
+            if (verification == PeerTrustStore.Verification.FIRST_CONTACT) {
+                listener.onPeerKeyTrusted(msg.username, KeyFingerprint.hex(key), true);
             }
+        } catch (PeerKeyMismatchException e) {
+            completeKeyRequestExceptionally(msg.username, e);
+            listener.onPeerKeyChanged(e.getUsername(),
+                    e.getExpectedFingerprint(), e.getActualFingerprint());
+        } catch (Exception e) {
+            completeKeyRequestExceptionally(msg.username, e);
+        }
+    }
+
+    private void completeKeyRequestExceptionally(String username, Throwable error) {
+        if (username == null) {
+            return;
+        }
+        CompletableFuture<PublicKey> future = pendingKeyRequests.remove(username);
+        if (future != null) {
+            future.completeExceptionally(error);
         }
     }
 

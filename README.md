@@ -4,15 +4,24 @@ A TCP-based end-to-end encrypted chat built from scratch in Java, focused on
 understanding cryptographic primitives directly rather than relying on high-level
 libraries.
 
-The current release (**v0.6**) keeps the end-to-end encryption core and hardens
-the deployment around it: TLS 1.3 everywhere, a transcript-bound v2 handshake
-with explicit key confirmation, strict message sequence numbers, JWT-authenticated
-chat access, PostgreSQL-backed users, and fail-closed configuration.
+The current release (**v0.7**) adds **per-message forward secrecy** to the
+end-to-end core: message protocol v3 with one-way HMAC chains and a DH ratchet.
+Earlier releases hardened the deployment around it: TLS 1.3 everywhere, a
+transcript-bound handshake with explicit key confirmation, strict message
+sequence numbers, JWT-authenticated chat access, PostgreSQL-backed users, and
+fail-closed configuration.
 
 > **Security documentation** — threat model, key hierarchy, and residual risks
 > are documented in [`SECURITY.md`](SECURITY.md). The full protocol
-> specification is in [`protocol/EN/PROTOCOL_06.md`](protocol/EN/PROTOCOL_06.md)
-> (Russian: [`protocol/RU/PROTOCOL_06.md`](protocol/RU/PROTOCOL_06.md)).
+> specification is in [`protocol/EN/PROTOCOL_07.md`](protocol/EN/PROTOCOL_07.md)
+> (Russian: [`protocol/RU/PROTOCOL_07.md`](protocol/RU/PROTOCOL_07.md)).
+>
+> **Beginner's guide** (Russian) — every algorithm's role, code examples from
+> this repository, the key hierarchy and the life of one message:
+> [`CRYPTO_GUIDE_RU.md`](CRYPTO_GUIDE_RU.md).
+>
+> **Auth guide** (Russian) — access/refresh tokens, rotation, session
+> revocation: [`AUTH_GUIDE_RU.md`](AUTH_GUIDE_RU.md).
 
 ---
 
@@ -23,6 +32,10 @@ chat access, PostgreSQL-backed users, and fail-closed configuration.
   messages.
 - **Forward secrecy per session** — session keys are derived from ephemeral ECDH
   (P-256) key pairs that are destroyed after the handshake.
+- **Per-message forward secrecy** — every message is encrypted with a fresh key
+  from a one-way HMAC chain, so leaking one key exposes exactly one message.
+  The DH ratchet rekeys the root every round trip, so even a stolen session
+  snapshot stops working after the next rotation (break-in recovery).
 - **Transcript-bound key derivation** — HKDF-SHA256 uses the full handshake
   transcript (both identities and both ephemeral keys) as salt, so keys cannot
   be reused across peers or sessions.
@@ -32,12 +45,20 @@ chat access, PostgreSQL-backed users, and fail-closed configuration.
   sequence number authenticated as GCM AAD.
 - **Authenticated handshake** — ephemeral keys are signed with the long-lived
   RSA-2048 identity key; the signature binds the role and both usernames.
+- **Peer key verification** — the first public key seen for a peer is pinned
+  locally (TOFU), and a later key change blocks the handshake until an explicit
+  `/trust`. `/safety <user>` shows a safety number to compare over a separate
+  channel, which detects server-side key substitution.
 - **Persistent identity** — each user has a long-lived RSA key pair stored
   locally in a password-protected file (PBKDF2 600k + AES-GCM).
 - **TLS 1.3 transport** — both REST (HTTPS) and the chat TCP port use TLS 1.3;
   the old static pre-shared key has been removed.
 - **JWT authentication** — registration and login over REST; the chat identity
   is taken from the validated token, not from client claims.
+- **Session revocation** — short-lived access tokens (10 minutes) plus
+  single-use refresh tokens with rotation and reuse detection; `/logout`
+  immediately revokes **every** outstanding token of the user
+  (`token_version`), chat `JOIN` included.
 - **Session lifecycle** — sessions expire on idle timeout or absolute age,
   triggering a fresh handshake (key rotation) on the next message.
 - **Key zeroization** — session keys and confirmation tags are overwritten on
@@ -80,6 +101,9 @@ Edit `.env` and set at least:
 - `DB_PASSWORD` — your PostgreSQL password
 - `JWT_SECRET` — a random value of at least 32 bytes (leave empty only for a
   throwaway local run; tokens then reset on every restart)
+- `JWT_EXPIRATION_MINUTES` — access-token TTL (default10 minutes); long-lived
+  sessions are served by refresh tokens (`REFRESH_TOKEN_DAYS`, default30 days,
+  single-use — rotated on every `/refresh`)
 - `TLS_KEYSTORE_PASSWORD` / `TLS_KEY_PASSWORD` / `TLS_TRUSTSTORE_PASSWORD`
 
 The Gradle build loads `.env` automatically for `bootRun`, `runServer`,
@@ -132,6 +156,26 @@ environment.
 3. In each: register a username/password (password ≥ 8 characters), then log in.
 4. Message a peer with `@username message text` — the first message triggers an
    automatic E2E handshake, subsequent ones reuse the session key.
+5. Run `/safety <username>` on both sides and compare the number over a separate
+   channel (in person, by phone, in a signed message) to rule out a server-side
+   key substitution.
+
+### Key verification
+
+On first contact the client pins the peer's public-key fingerprint in
+`~/.secure-chat/known-peers.tsv`. If the server later returns a different key,
+the client refuses to use it and prints a warning with the expected and offered
+fingerprints. After verifying the new key out of band, accept it with:
+
+```text
+/safety <user>                       # show the safety number to compare
+/fingerprint                         # show your own key fingerprint
+/trust <user> <fingerprint-prefix>   # accept a changed key (at least 16 hex chars)
+```
+
+This is Trust On First Use (TOFU): the first contact still trusts the server,
+so compare the safety number when you first connect. Fully removing that risk
+requires key transparency — see [`SECURITY.md`](SECURITY.md).
 
 ---
 
@@ -149,12 +193,15 @@ app/src/main/java/org/ugina/
 ├── client/                   # Chat client (console TUI, sessions, TLS)
 │   ├── ChatClientCore.java   #   handshake + message routing
 │   ├── SessionContext.java   #   per-peer session state machine
+│   ├── PeerTrustStore.java   #   TOFU store for peer identity keys
 │   └── ConsoleTui.java       #   interactive prompt
 ├── server/                   # Chat server (TLS, routing, validation)
 ├── protocol/                 # Message types, commands, error codes
 ├── crypto/                   # Cryptographic primitives
 │   ├── AesCrypto             #   AES-256-GCM
 │   ├── SessionCrypto         #   v2 E2E protocol (HKDF, transcript, AAD)
+│   ├── KeyFingerprint        #   identity-key fingerprint
+│   ├── SafetyNumber          #   safety number for key comparison
 │   ├── RsaCrypto             #   RSA-2048 keys + validation
 │   ├── RsaSignature          #   SHA256withRSA signatures
 │   ├── EcdhCrypto            #   ephemeral ECDH (P-256)
@@ -191,7 +238,7 @@ implementation is local (BCrypt + JWT), but the abstraction is designed to allow
 swapping in an external provider (e.g. Keycloak) without touching the chat layer.
 
 For the complete handshake sequence and message formats, see
-[`protocol/EN/PROTOCOL_06.md`](protocol/EN/PROTOCOL_06.md). For the threat model
+[`protocol/EN/PROTOCOL_07.md`](protocol/EN/PROTOCOL_07.md). For the threat model
 and residual risks, see [`SECURITY.md`](SECURITY.md).
 
 ---
@@ -216,18 +263,23 @@ and residual risks, see [`SECURITY.md`](SECURITY.md).
 - PostgreSQL persistence with Flyway migrations
 - Session lifecycle (idle + absolute timeout, key rotation)
 
-### v0.6 — current
+### v0.6 — done
 - TLS 1.3 replaces the static PSK transport layer
 - v2 handshake: transcript-bound HKDF, directional keys, explicit confirmation
 - Strict per-message sequence numbers (replay/reordering protection)
 - Default-deny HTTP authorization and hardened runtime configuration
 - Rate limiting and bounded frames / thread pools
+- Peer key verification: TOFU pinning, safety numbers, `/trust`
 - Local development certificate tooling and `SECURITY.md`
 
-### v0.7 — planned
-- Safety numbers / key verification (mitigates server-side key substitution)
-- Refresh tokens and server-side token revocation
-- Per-message forward secrecy (Double Ratchet)
+### v0.7 — in progress
+- **Per-message forward secrecy (Double Ratchet) — done**: E2E protocol v3,
+  HMAC chains + DH ratchet, covered by `RatchetTest`
+- **Refresh tokens and token revocation — done**: rotation, reuse detection,
+  `token_version`, `/refresh`, `/logout`, covered by `AUTH_FLOW_OK`
+- **Identity-key rotation — done**: `/rotate-key` (step-up: session + password),
+  self-healing signature verification, covered by `KEY_ROTATE_E2E_OK`
+- Key transparency (append-only log) for key verification without manual comparison
 
 ### v1.0 — planned
 - WebSocket transport + web client
@@ -240,9 +292,10 @@ and residual risks, see [`SECURITY.md`](SECURITY.md).
 
 This is a learning project. It implements real cryptographic constructions
 correctly and is covered by unit tests, but it is **not audited** and should not
-be used to protect sensitive communications. Known limitations — including the
-server-trusted key distribution, the lack of per-message forward secrecy, and
-best-effort memory wiping — are tracked in [`SECURITY.md`](SECURITY.md).
+be used to protect sensitive communications. Known limitations — including
+first-contact trust in the server (TOFU), the lack of key transparency,
+per-message forward secrecy, and best-effort memory wiping — are tracked in
+[`SECURITY.md`](SECURITY.md).
 
 ---
 

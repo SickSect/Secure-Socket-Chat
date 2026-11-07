@@ -13,6 +13,7 @@ public class RateLimitProperties {
 
     private Limit register = new Limit();
     private Limit login = new Limit();
+    private Limit refresh = new Limit();
 
     @Getter
     @Setter

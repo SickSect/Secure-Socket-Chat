@@ -1,6 +1,8 @@
 # Secure Chat — Protocol Specification v2 (v0.6)
 
-Status: current for release **v0.6**.
+Status: **superseded** — current is [`PROTOCOL_07.md`](PROTOCOL_07.md)
+(E2E protocol v3, release v0.7). This document describes protocol v2
+(release v0.6) and is kept for history.
 Previous version: [`PROTOCOL_05.md`](PROTOCOL_05.md).
 
 ---
@@ -347,13 +349,19 @@ Provided:
 - per-session forward secrecy (ephemeral ECDH keys are destroyed);
 - handshake authentication with long-lived RSA keys;
 - key binding to the transcript and to each direction;
-- chat identity taken from the JWT, not from client input.
+- chat identity taken from the JWT, not from client input;
+- local pinning (TOFU) of peer identity keys — a later key change from the
+  server is rejected until the user explicitly runs `/trust`;
+- safety numbers derived from both identity keys for out-of-band comparison
+  (`/safety <user>`).
 
 Not provided (see [`SECURITY.md`](../../SECURITY.md)):
 
-- protection against an active malicious server that substitutes public keys;
+- protection against a malicious server on the very first key lookup: TOFU
+  trusts the first key, and safety-number comparison is manual, not enforced;
+- key transparency (an append-only log that would let clients verify key
+  consistency without manual comparison);
 - per-message forward secrecy;
-- safety numbers / fingerprint verification;
 - JWT revocation and refresh tokens;
 - metadata hiding from the server.
 

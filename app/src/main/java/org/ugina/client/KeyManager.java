@@ -61,6 +61,19 @@ public class KeyManager {
     }
 
     /**
+     * Stores an existing RSA pair, overwriting any current local key file.
+     * Used for identity-key rotation and for rolling back a rotation whose
+     * server-side update failed (the device and the key directory must never
+     * disagree).
+     */
+    public void store(String username, KeyPair keyPair, char[] password) throws Exception {
+        if (keyPair == null) {
+            throw new IllegalArgumentException("keyPair is required");
+        }
+        storageFor(username).save(keyPair, password);
+    }
+
+    /**
      * Removes a local key file, for example when the server rejected the
      * registration after the key had already been written.
      */
